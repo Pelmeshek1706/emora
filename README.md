@@ -254,3 +254,9 @@ flowchart TD
 
   CCV --> WRITE["write frame when size != 0"]
 ```
+
+## 8) Additional Documentation
+
+- [Blink rate notes](/Users/pelmeshek1706/Desktop/projects/airest-voice/blink_rate.md)
+- [Facial expression / facial expressivity notes](/Users/pelmeshek1706/Desktop/projects/airest-voice/facial_expression.md)
+- [Emotional expressivity notes](/Users/pelmeshek1706/Desktop/projects/airest-voice/emotional_expressivity.md)

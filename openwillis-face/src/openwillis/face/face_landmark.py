@@ -2,6 +2,11 @@
 # website:   http://www.bklynhlth.com
 
 # import the required packages
+from collections import defaultdict
+from datetime import datetime
+from contextlib import contextmanager
+from functools import wraps
+from time import perf_counter
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -11,18 +16,182 @@ import json
 import os
 import logging
 import mediapipe as mp
-from protobuf_to_dict import protobuf_to_dict
 
 from .util import crop_with_padding_and_center, get_speaking_probabilities, split_speaking_df, get_summary
 
 logging.basicConfig(level=logging.INFO)
-logger=logging.getLogger()
+logger = logging.getLogger(__name__)
 
 BBoxDict = Dict[str, Any]
 BBoxList = List[BBoxDict]
 RotationMatrixList = List[np.ndarray]
+TimingStats = Dict[str, Dict[str, float]]
+
+NUM_LANDMARKS = 468
+FRAME_META_COLUMNS = ["frame", "time"]
+LANDMARK_COORD_COLUMNS = [
+    f"lmk{index:03d}_{axis}"
+    for axis in ("x", "y", "z")
+    for index in range(1, NUM_LANDMARKS + 1)
+]
+LANDMARK_DISPLACEMENT_COLUMNS = [
+    f"lmk{index:03d}" for index in range(1, NUM_LANDMARKS + 1)
+]
+EMPTY_LANDMARK_ROW = np.full(len(LANDMARK_COORD_COLUMNS), np.nan, dtype=float)
+TIMING_ENABLED = os.getenv("OPENWILLIS_FACE_TIMING", "").lower() in {"1", "true", "yes", "on"}
+
+_TIMING_STATS: TimingStats = defaultdict(lambda: {"count": 0, "total_seconds": 0.0})
+_LANDMARK_CACHE: Dict[Tuple[str, str], pd.DataFrame] = {}
 
 
+def _current_timestamp() -> str:
+    """
+    Return an ISO-8601 timestamp with millisecond precision for timing logs.
+    """
+    return datetime.now().astimezone().isoformat(timespec="milliseconds")
+
+
+def _reset_timing_stats() -> None:
+    """
+    Clear accumulated timing statistics for a new facial_expressivity run.
+    """
+    _TIMING_STATS.clear()
+
+
+def _normalize_cache_value(value: Any) -> Any:
+    """
+    Convert bbox data into a stable JSON-serializable representation.
+    """
+    if isinstance(value, dict):
+        return {key: _normalize_cache_value(val) for key, val in sorted(value.items())}
+
+    if isinstance(value, (list, tuple)):
+        return [_normalize_cache_value(item) for item in value]
+
+    if isinstance(value, np.generic):
+        value = value.item()
+
+    if isinstance(value, float) and np.isnan(value):
+        return "NaN"
+
+    return value
+
+
+def _get_landmark_cache_key(path: str, bbox_list: BBoxList) -> Tuple[str, str]:
+    """
+    Create a stable cache key for raw landmarks from the video path and bbox list.
+    """
+    normalized_path = os.path.abspath(path)
+    bbox_fingerprint = json.dumps(
+        _normalize_cache_value(bbox_list),
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    return normalized_path, bbox_fingerprint
+
+
+def _get_empty_landmark_dataframe(frame: int, fps: int) -> pd.DataFrame:
+    """
+    Build a one-row landmark dataframe filled with NaNs for undetected frames.
+    """
+    time_value = frame / fps if fps else np.nan
+    df_meta = pd.DataFrame([[frame, time_value]], columns=FRAME_META_COLUMNS)
+    df_coord = pd.DataFrame([EMPTY_LANDMARK_ROW.copy()], columns=LANDMARK_COORD_COLUMNS)
+    return pd.concat([df_meta, df_coord], axis=1)
+
+
+def _log_timing_summary() -> None:
+    """
+    Log a timing summary sorted by total elapsed time.
+    """
+    if not TIMING_ENABLED or not _TIMING_STATS:
+        return
+
+    logger.info("facial_expressivity timing summary start")
+    summary_rows = sorted(
+        _TIMING_STATS.items(),
+        key=lambda item: item[1]["total_seconds"],
+        reverse=True,
+    )
+
+    for function_name, stats in summary_rows:
+        count = int(stats["count"])
+        total_seconds = stats["total_seconds"]
+        average_seconds = total_seconds / count if count else 0.0
+        logger.info(
+            "timing_summary function=%s calls=%s total_seconds=%.3f avg_seconds=%.3f",
+            function_name,
+            count,
+            total_seconds,
+            average_seconds,
+        )
+
+    logger.info("facial_expressivity timing summary end")
+
+
+def _timed(func):
+    """
+    Decorator that logs start and end timestamps and records cumulative timing stats.
+    """
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if not TIMING_ENABLED:
+            return func(*args, **kwargs)
+
+        function_name = func.__name__
+        start_timestamp = _current_timestamp()
+        start_time = perf_counter()
+        logger.info("timing_start function=%s timestamp=%s", function_name, start_timestamp)
+
+        try:
+            return func(*args, **kwargs)
+        finally:
+            end_time = perf_counter()
+            elapsed_seconds = end_time - start_time
+            end_timestamp = _current_timestamp()
+            _TIMING_STATS[function_name]["count"] += 1
+            _TIMING_STATS[function_name]["total_seconds"] += elapsed_seconds
+            logger.info(
+                "timing_end function=%s timestamp=%s elapsed_seconds=%.3f",
+                function_name,
+                end_timestamp,
+                elapsed_seconds,
+            )
+
+    return wrapper
+
+
+@contextmanager
+def _timed_block(block_name: str):
+    """
+    Context manager for timing internal stages inside a function.
+    """
+    if not TIMING_ENABLED:
+        yield
+        return
+
+    start_timestamp = _current_timestamp()
+    start_time = perf_counter()
+    logger.info("timing_start function=%s timestamp=%s", block_name, start_timestamp)
+
+    try:
+        yield
+    finally:
+        elapsed_seconds = perf_counter() - start_time
+        end_timestamp = _current_timestamp()
+        _TIMING_STATS[block_name]["count"] += 1
+        _TIMING_STATS[block_name]["total_seconds"] += elapsed_seconds
+        logger.info(
+            "timing_end function=%s timestamp=%s elapsed_seconds=%.3f",
+            block_name,
+            end_timestamp,
+            elapsed_seconds,
+        )
+
+
+@_timed
 def get_config(filepath: str, json_file: str) -> Dict[str, Any]:
     """
     ------------------------------------------------------------------------------------------------------
@@ -51,6 +220,7 @@ def get_config(filepath: str, json_file: str) -> Dict[str, Any]:
     return measures
 
 
+@_timed
 def init_facemesh() -> Any:
     """
     ---------------------------------------------------------------------------------------------------
@@ -74,74 +244,13 @@ def init_facemesh() -> Any:
     face_mesh = mp_face_mesh.FaceMesh(min_detection_confidence=0.5)
     return face_mesh
 
-def filter_landmarks(col_name: str, keypoints: Dict[str, Any]) -> pd.DataFrame:
+@_timed
+def filter_coord(result: Any) -> np.ndarray:
     """
     ---------------------------------------------------------------------------------------------------
 
-    This function takes the column name and landmark keypoints detected by Facemesh as inputs, and
-    returns a Pandas dataframe with the filtered landmarks in the specified column.
-
-    Parameters:
-    ............
-    col_name : str
-        Column name to filter landmarks into
-    keypoints : dict
-        Landmark keypoints detected by Facemesh
-
-    Returns:
-    ............
-    df : pandas.DataFrame
-        Dataframe with the filtered landmarks in the specified column
-
-    ---------------------------------------------------------------------------------------------------
-    """
-
-    col_list = list(range(0, 468))
-    cols = ['lmk' + str(s+1).zfill(3) + '_' + col_name for s in col_list]
-
-    item = list(map(lambda d: d[col_name], keypoints['landmark']))
-    df = pd.DataFrame([item], columns=cols)
-
-    return df
-
-def get_column() -> pd.DataFrame:
-    """
-    ---------------------------------------------------------------------------------------------------
-
-    This function returns an empty Pandas dataframe with columns corresponding to the 468 facial landmark
-    coordinates, labeled with the landmark number and x/y/z coordinate.
-
-    Parameters:
-    ............
-    None
-
-    Returns:
-    ............
-    df : pandas.DataFrame
-        Empty dataframe with columns for each facial landmark coordinate
-
-    ---------------------------------------------------------------------------------------------------
-    """
-
-    col_list = list(range(0, 468))
-    col_name = []
-
-    value = [np.nan] * 468 *3
-    lmk_cord = ['x', 'y', 'z']
-
-    for col in lmk_cord:
-        cols = [col + '_' + str(s+1) for s in col_list]
-        col_name.extend(cols)
-
-    df = pd.DataFrame([value], columns = col_name)
-    return df
-
-def filter_coord(result: Any) -> pd.DataFrame:
-    """
-    ---------------------------------------------------------------------------------------------------
-
-    This function takes the output from a Facemesh object and returns a Pandas dataframe with the filtered
-    3D coordinates of each facial landmark detected.
+    This function takes the output from a Facemesh object and returns the flattened 3D coordinates for
+    each facial landmark.
 
     Parameters:
     ............
@@ -150,54 +259,56 @@ def filter_coord(result: Any) -> pd.DataFrame:
 
     Returns:
     ............
-    df_coord : pandas.DataFrame
-        Dataframe with the filtered 3D coordinates of each facial landmark detected
+    coord_row : numpy.ndarray
+        Flattened landmark coordinates ordered as all x values, then y values, then z values
 
     ---------------------------------------------------------------------------------------------------
     """
 
-    df_coord = get_column()
+    if not result.multi_face_landmarks:
+        return EMPTY_LANDMARK_ROW.copy()
 
-    for face_landmarks in result.multi_face_landmarks:
-        keypoints = protobuf_to_dict(face_landmarks)
+    landmarks = result.multi_face_landmarks[0].landmark[:NUM_LANDMARKS]
+    x_coords = [landmark.x for landmark in landmarks]
+    y_coords = [landmark.y for landmark in landmarks]
+    z_coords = [landmark.z for landmark in landmarks]
 
-    if len(keypoints)>0:
-        df_x = filter_landmarks('x', keypoints)
-        df_y = filter_landmarks('y', keypoints)
-        df_z = filter_landmarks('z', keypoints)
-        df_coord = pd.concat([df_x, df_y, df_z], axis=1)
+    if len(landmarks) < NUM_LANDMARKS:
+        missing_count = NUM_LANDMARKS - len(landmarks)
+        x_coords.extend([np.nan] * missing_count)
+        y_coords.extend([np.nan] * missing_count)
+        z_coords.extend([np.nan] * missing_count)
 
-    return df_coord
+    return np.asarray(x_coords + y_coords + z_coords, dtype=float)
 
+@_timed
 def process_and_format_face_mesh(
     img: np.ndarray,
     face_mesh: Any,
-    df_common: pd.DataFrame,
-) -> pd.DataFrame:
+    ) -> np.ndarray:
     """
     Process the given image using the face_mesh model and format the resulting face landmarks.
 
     Args:
         img (numpy.ndarray): The input image.
         face_mesh: The face_mesh model.
-        df_common (pandas.DataFrame): The common dataframe.
-
     Returns:
-        pandas.DataFrame: The formatted dataframe containing the face landmarks.
+        numpy.ndarray: Flattened landmark coordinates for the frame.
     """
-    result = face_mesh.process(img)
-    df_coord = filter_coord(result)
-    df_landmark = pd.concat([df_common, df_coord], axis=1)
-    return df_landmark
+    with _timed_block("process_and_format_face_mesh.face_mesh_process"):
+        result = face_mesh.process(img)
 
+    with _timed_block("process_and_format_face_mesh.filter_coord"):
+        coord_row = filter_coord(result)
+
+    return coord_row
+
+@_timed
 def crop_and_process_face_mesh(
     img: np.ndarray,
     face_mesh: Any,
-    df_common: pd.DataFrame,
     bbox: BBoxDict,
-    frame: int,
-    fps: int,
-) -> pd.DataFrame:
+    ) -> np.ndarray:
     """
     ---------------------------------------------------------------------------------------------------
     Crop and process the face mesh on the given image.
@@ -205,28 +316,21 @@ def crop_and_process_face_mesh(
     Args:
         img (numpy.ndarray): The input image.
         face_mesh (object): The face mesh object.
-        df_common (pd.Dataframe): The common dataframe.
         bbox (dict): The bounding box coordinates of the face.
-        frame (int): The frame index
-        fps (int): The frames per second of the video
     .......
     Returns:
-        pandas.DataFrame: The processed face landmarks dataframe.
+        numpy.ndarray: Flattened landmark coordinates for the frame.
     ---------------------------------------------------------------------------------------------------
     """
     if bbox and not np.isnan(bbox['bb_x']):
         cropped_img = crop_with_padding_and_center(img, bbox)
-        df_landmark = process_and_format_face_mesh(
-            cropped_img,
-            face_mesh,
-            df_common
-        )
-    else:
-        df_landmark = get_undected_markers(frame,fps)
-    return df_landmark
+        return process_and_format_face_mesh(cropped_img, face_mesh)
+
+    return EMPTY_LANDMARK_ROW.copy()
 
 
-def run_facemesh(path: str, bbox_list: BBoxList = []) -> List[pd.DataFrame]:
+@_timed
+def run_facemesh(path: str, bbox_list: BBoxList = []) -> pd.DataFrame:
     """
     ---------------------------------------------------------------------------------------------------
 
@@ -242,13 +346,14 @@ def run_facemesh(path: str, bbox_list: BBoxList = []) -> List[pd.DataFrame]:
 
     Returns:
     ............
-    df_list : list
-        List of dataframes containing landmark coordinates for each frame of the video
+    df_landmark : pandas.DataFrame
+        DataFrame containing landmark coordinates for each frame of the video
 
     ---------------------------------------------------------------------------------------------------
     """
 
-    df_list = []
+    coord_rows: List[np.ndarray] = []
+    meta_rows: List[Tuple[int, float]] = []
     frame = 0
 
     try:
@@ -257,10 +362,8 @@ def run_facemesh(path: str, bbox_list: BBoxList = []) -> List[pd.DataFrame]:
         num_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         fps = int(cap.get(cv2.CAP_PROP_FPS))
         len_bbox_list = len(bbox_list)
-        print(num_frames, len_bbox_list)
 
         if (len_bbox_list>0) & (num_frames != len_bbox_list):
-            print(num_frames, len_bbox_list)
             raise ValueError('Number of frames in video and number of bounding boxes do not match')
         
         face_mesh = init_facemesh()
@@ -271,41 +374,42 @@ def run_facemesh(path: str, bbox_list: BBoxList = []) -> List[pd.DataFrame]:
                 ret_type, img = cap.read()
                 if ret_type is not True:
                     break
-                df_common = pd.DataFrame([[frame, frame/fps]], columns=['frame','time'])
-                img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                time_value = frame / fps if fps else np.nan
+                with _timed_block("run_facemesh.cvtColor"):
+                    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
                 if len_bbox_list==0:
 
-                    df_landmark = process_and_format_face_mesh(
-                        img_rgb,
-                        face_mesh,
-                        df_common
-                    )
+                    coord_row = process_and_format_face_mesh(img_rgb, face_mesh)
                     
                 else:
                     
                     bbox = bbox_list[frame]
-                    df_landmark = crop_and_process_face_mesh(
-                        img_rgb,
-                        face_mesh,
-                        df_common,
-                        bbox,
-                        frame,
-                        fps
-                    )
+                    coord_row = crop_and_process_face_mesh(img_rgb, face_mesh, bbox)
 
             except Exception as e:
-                print(e,frame)
-                df_landmark = get_undected_markers(frame,fps)
+                logger.debug("Face mesh failed on frame %s with error: %s", frame, e)
+                coord_row = EMPTY_LANDMARK_ROW.copy()
 
-            df_list.append(df_landmark)
+            meta_rows.append((frame, time_value))
+            coord_rows.append(coord_row)
             frame +=1
 
     except Exception as e:
         logger.info(f'Face not detected by mediapipe file: {path} & Error: {e}')
 
-    return df_list
+    finally:
+        if 'cap' in locals():
+            cap.release()
 
+    if not coord_rows:
+        return pd.DataFrame(columns=FRAME_META_COLUMNS + LANDMARK_COORD_COLUMNS)
+
+    df_meta = pd.DataFrame(meta_rows, columns=FRAME_META_COLUMNS)
+    df_coord = pd.DataFrame(coord_rows, columns=LANDMARK_COORD_COLUMNS)
+    return pd.concat([df_meta, df_coord], axis=1)
+
+@_timed
 def get_undected_markers(frame: int, fps: int) -> pd.DataFrame:
     """
     ---------------------------------------------------------------------------------------------------
@@ -327,20 +431,9 @@ def get_undected_markers(frame: int, fps: int) -> pd.DataFrame:
 
     ---------------------------------------------------------------------------------------------------
     """
-    df_common = pd.DataFrame([[frame, frame/fps]], columns=['frame','time'])
-    df_coord = get_column()
+    return _get_empty_landmark_dataframe(frame, fps)
 
-    col_list = list(range(0, 468))
-    cols_x = ['lmk' + str(s+1).zfill(3) + '_x' for s in col_list]
-    cols_y = ['lmk' + str(s+1).zfill(3) + '_y' for s in col_list]
-    cols_z = ['lmk' + str(s+1).zfill(3) + '_z' for s in col_list]
-
-    cols = cols_x + cols_y + cols_z
-    df_coord.columns = cols
-
-    df_landmark = pd.concat([df_common, df_coord], axis=1)
-    return df_landmark
-
+@_timed
 def get_landmarks(path: str, bbox_list: BBoxList = []) -> pd.DataFrame:
 
     """
@@ -366,12 +459,17 @@ def get_landmarks(path: str, bbox_list: BBoxList = []) -> pd.DataFrame:
     ---------------------------------------------------------------------------------------------------
     """
 
-    landmark_list = run_facemesh(path, bbox_list=bbox_list)
+    cache_key = _get_landmark_cache_key(path, bbox_list)
+    cached_df = _LANDMARK_CACHE.get(cache_key)
 
+    if cached_df is not None:
+        return cached_df
 
-    if len(landmark_list)>0:
-        df_landmark = pd.concat(landmark_list).reset_index(drop=True)
+    df_landmark = run_facemesh(path, bbox_list=bbox_list)
 
+    if len(df_landmark)>0:
+        df_landmark = df_landmark.reset_index(drop=True)
+        _LANDMARK_CACHE[cache_key] = df_landmark
     else:
         standard_fps = 25
         df_landmark = get_undected_markers(0,standard_fps)
@@ -379,6 +477,7 @@ def get_landmarks(path: str, bbox_list: BBoxList = []) -> pd.DataFrame:
 
     return df_landmark
 
+@_timed
 def get_distance(df: pd.DataFrame) -> pd.DataFrame:
     """
     ---------------------------------------------------------------------------------------------------
@@ -400,17 +499,19 @@ def get_distance(df: pd.DataFrame) -> pd.DataFrame:
     """
     disp_list = []
 
-    for col in range(0, 468):
-        dist= np.sqrt(np.power(df['lmk' + str(col+1).zfill(3) + '_x'].shift() - df['lmk' + str(col+1).zfill(3) + '_x'], 2) +
-                     np.power(df['lmk' + str(col+1).zfill(3) + '_y'].shift() - df['lmk' + str(col+1).zfill(3) + '_y'], 2) +
-                     np.power(df['lmk' + str(col+1).zfill(3) + '_z'].shift() - df['lmk' + str(col+1).zfill(3) + '_z'], 2))
+    for col in range(NUM_LANDMARKS):
+        landmark_name = LANDMARK_DISPLACEMENT_COLUMNS[col]
+        dist= np.sqrt(np.power(df[f'{landmark_name}_x'].shift() - df[f'{landmark_name}_x'], 2) +
+                     np.power(df[f'{landmark_name}_y'].shift() - df[f'{landmark_name}_y'], 2) +
+                     np.power(df[f'{landmark_name}_z'].shift() - df[f'{landmark_name}_z'], 2))
 
-        df_dist = pd.DataFrame(dist, columns=['lmk' + str(col+1).zfill(3)])
+        df_dist = pd.DataFrame(dist, columns=[landmark_name])
         disp_list.append(df_dist)
 
     displacement_df = pd.concat(disp_list, axis=1).reset_index(drop=True)
     return displacement_df
 
+@_timed
 def get_mouth_height(df: pd.DataFrame, measures: Dict[str, Any]) -> pd.Series:
     """
     ---------------------------------------------------------------------------------------------------
@@ -448,6 +549,7 @@ def get_mouth_height(df: pd.DataFrame, measures: Dict[str, Any]) -> pd.Series:
     
     return mouth_height
 
+@_timed
 def get_lip_height(df: pd.DataFrame, lip: str, measures: Dict[str, Any]) -> pd.Series:
     """
     ---------------------------------------------------------------------------------------------------
@@ -494,6 +596,7 @@ def get_lip_height(df: pd.DataFrame, lip: str, measures: Dict[str, Any]) -> pd.S
     
     return lip_height
 
+@_timed
 def get_mouth_openness(df: pd.DataFrame, measures: Dict[str, Any]) -> pd.Series:
     """
     ---------------------------------------------------------------------------------------------------
@@ -524,6 +627,7 @@ def get_mouth_openness(df: pd.DataFrame, measures: Dict[str, Any]) -> pd.Series:
 
     return mouth_openness
 
+@_timed
 def baseline(
     base_path: str,
     bbox_list: BBoxList = [],
@@ -572,6 +676,7 @@ def baseline(
     base_df += 1 #Normalization
     return base_df
 
+@_timed
 def get_empty_dataframe() -> pd.DataFrame:
     """
     ---------------------------------------------------------------------------------------------------
@@ -590,10 +695,11 @@ def get_empty_dataframe() -> pd.DataFrame:
 
     ---------------------------------------------------------------------------------------------------
     """
-    columns = ['frame','time'] + ['lmk' + str(col+1).zfill(3) for col in range(0, 468)] + ['overall']
+    columns = FRAME_META_COLUMNS + LANDMARK_DISPLACEMENT_COLUMNS + ['overall']
     empty_df = pd.DataFrame(columns=columns)
     return empty_df
 
+@_timed
 def get_displacement(
         lmk_df: pd.DataFrame,
         base_path: str,
@@ -663,6 +769,7 @@ def get_displacement(
         logger.info(f'Error in displacement calculation is {e}')
     return displacement_df
 
+@_timed
 def calculate_areas_displacement(
     displacement_df: pd.DataFrame,
     measures: Dict[str, Any],
@@ -705,6 +812,7 @@ def calculate_areas_displacement(
 
     return displacement_df
 
+@_timed
 def apply_rotation_per_frame(
     norm_df: pd.DataFrame,
     rotation_matrices: RotationMatrixList,
@@ -741,6 +849,7 @@ def apply_rotation_per_frame(
     return norm_df
 
 
+@_timed
 def calculate_rotation_matrix_for_all_frames(
     left_eye_x: pd.Series,
     left_eye_y: pd.Series,
@@ -788,6 +897,7 @@ def calculate_rotation_matrix_for_all_frames(
 
     return rotation_matrices
 
+@_timed
 def center_landmarks(df: pd.DataFrame, nose_tip: str) -> pd.DataFrame:
     """
     ---------------------------------------------------------------------------------------------------
@@ -815,6 +925,7 @@ def center_landmarks(df: pd.DataFrame, nose_tip: str) -> pd.DataFrame:
     norm_df = pd.concat(norm_data.values(), axis=1)
     return norm_df
 
+@_timed
 def get_vertices_for_col(df: pd.DataFrame, col_name: str) -> Tuple[pd.Series, pd.Series, pd.Series]:
     """
     Extracts the x, y, and z coordinates for a given column.
@@ -837,6 +948,7 @@ def get_vertices_for_col(df: pd.DataFrame, col_name: str) -> Tuple[pd.Series, pd
     return x_col, y_col, z_col
 
 # Main function with the refactored parts included
+@_timed
 def normalize_face_landmarks(
     df: pd.DataFrame,
     align: bool = True,
@@ -964,9 +1076,20 @@ def facial_expressivity(
     ---------------------------------------------------------------------------------------------------
     """
     config = get_config(os.path.abspath(__file__), "facial.json")
+    if TIMING_ENABLED:
+        _reset_timing_stats()
+        start_timestamp = _current_timestamp()
+        start_time = perf_counter()
+        logger.info(
+            "timing_start function=facial_expressivity timestamp=%s filepath=%s baseline_filepath=%s",
+            start_timestamp,
+            filepath,
+            baseline_filepath,
+        )
+    else:
+        start_time = None
 
     try:
-
         df_landmark = get_landmarks(filepath, bbox_list=bbox_list)
         
         if normalize:
@@ -994,3 +1117,15 @@ def facial_expressivity(
 
     except Exception as e:
         logger.info(f'Error in facial landmark calculation file: {filepath} & Error: {e}')
+    finally:
+        if TIMING_ENABLED and start_time is not None:
+            elapsed_seconds = perf_counter() - start_time
+            end_timestamp = _current_timestamp()
+            _TIMING_STATS["facial_expressivity"]["count"] += 1
+            _TIMING_STATS["facial_expressivity"]["total_seconds"] += elapsed_seconds
+            logger.info(
+                "timing_end function=facial_expressivity timestamp=%s elapsed_seconds=%.3f",
+                end_timestamp,
+                elapsed_seconds,
+            )
+            _log_timing_summary()
