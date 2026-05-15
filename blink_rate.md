@@ -188,3 +188,150 @@ OpenWillis currently gives AIREST:
 - Blink rate in blinks/minute: yes
 - Blink event timing with start, peak, end in both frames and seconds: yes
 - Inter-blink intervals: no, derive separately in AIREST
+
+## Research notes for AIREST clinical relevance
+
+This section summarizes the user-provided research review:
+- [Blink Rate and Its Relationship to Detecting PTSD, Major Depressive Disorder, and Anxiety Disorders.pdf](/Users/pelmeshek1706/Desktop/projects/airest-face/Blink%20Rate%20and%20Its%20Relationship%20to%20Detecting%20PTSD,%20Major%20Depressive%20Disorder,%20and%20Anxiety%20Disorders.pdf)
+
+Bottom-line interpretation for AIREST:
+- Blink rate is clinically interesting and worth keeping as an AIREST feature.
+- The current literature does not support blink rate as a stand-alone diagnostic biomarker for PTSD, major depressive disorder, or anxiety disorders.
+- The strongest direct evidence is for depression-spectrum conditions.
+- PTSD and anxiety signals appear more context-dependent and currently less replicated.
+- The best future use is as a low-cost auxiliary feature inside a multimodal prediction system, not as a single screening rule.
+
+## Why this feature matters
+
+The review supports keeping blink in AIREST for three reasons:
+
+1. Blink rate has disorder-relevant signal.
+- Depression studies repeatedly found blink-related abnormalities in at least some populations and tasks.
+- PTSD work suggests blink behavior can change under threat/inhibitory-control conditions.
+- Panic-disorder work suggests blink rate may increase at rest and during emotionally loaded audiovisual stimulation.
+
+2. Blink is cheap to capture.
+- Blink can be derived from ordinary webcam video.
+- That makes it practical for remote or scalable psychiatric screening workflows.
+
+3. Blink is complementary to other modalities.
+- The review argues that blink is most useful when combined with other ocular, facial, speech, and self-report features.
+- This matches AIREST better than a stand-alone biomarker framing.
+
+4. Blink already has early prediction evidence in structured settings.
+- The review summarizes engineering studies where broader eye-movement features reached about `70-75%` accuracy for depression classification.
+- It also summarizes blink-feature models reporting about `88-92%` task-specific accuracy in structured interview-style tasks.
+- Those numbers support feature importance, but not clinical readiness, because the reviewed reports do not establish usable thresholds, sensitivity/specificity, or strong external validation.
+
+## Disorder-specific research relevance
+
+### Major depressive disorder
+
+Depression is the most promising current use case in the reviewed literature.
+
+Key findings summarized in the review:
+- Mackintosh et al. (1983, Br J Psychiatry, DOI `10.1192/BJP.143.1.55`) reported higher blink rate in depressed patients, with blink rate falling toward normal during treatment.
+- Ebert et al. (1996, Neuropsychopharmacology, DOI `10.1016/0893-133X(95)00237-8`) did not find a baseline blink-rate difference in non-retarded, drug-naive MDD, but did find that sleep deprivation increased blink rate in patients and that the increase tracked short-term improvement.
+- Lee et al. (2024, BMC Geriatrics, DOI `10.1186/s12877-024-05034-w`) found higher blink rate in late-life depression than in healthy older and younger controls, with positive correlations to symptom burden measures.
+- Lee et al. (2025, J Geriatr Psychiatry Neurol, DOI `10.1177/08919887251334999`) suggests blink abnormalities may also depend on emotional-conflict task context rather than appearing as a simple tonic group difference.
+
+Interpretation for AIREST:
+- Blink features are worth retaining for depression prediction work.
+- The likely value is not only raw blink rate, but also blink behavior under specific task conditions.
+- Depression-related blink signal may reflect arousal, psychomotor state, autonomic tone, symptom burden, or treatment-responsive state change rather than a single stable trait marker.
+
+### PTSD
+
+Direct PTSD blink-rate evidence is much thinner.
+
+Key finding summarized in the review:
+- Rubin et al. (2017, Brain Sciences, DOI `10.3390/brainsci7020016`) found that women with PTSD showed higher spontaneous blink rates mainly under low-threat conditions during an inhibitory-control task, not a universal increase across all contexts.
+
+Interpretation for AIREST:
+- Blink may still be useful for PTSD-related prediction, but probably only when paired with the right eliciting context.
+- Passive or resting blink rate alone may miss much of the signal.
+- If AIREST later adds task-evoked ocular analysis, PTSD may be a stronger future target than if blink is captured only as a general background measure.
+
+### Anxiety disorders
+
+The direct anxiety literature is weak and narrow.
+
+Key finding summarized in the review:
+- Kojima et al. (2002, Psychiatry Clin Neurosci, DOI `10.1046/j.1440-1819.2002.01052.x`) reported higher blink rates in a small panic-disorder pilot at rest and during audiovisual stimulation.
+
+Interpretation for AIREST:
+- Blink has some future relevance for anxiety-spectrum prediction, especially panic-related phenotypes.
+- But the current evidence is too sparse to treat blink as an established anxiety marker.
+- The review did not find a strong replicated blink-rate case-control literature for generalized anxiety disorder or social anxiety disorder.
+
+## What this means for future predictive use in AIREST
+
+The reviewed research supports a conservative roadmap:
+
+- Near-term use:
+  Keep blink rate as a supportive feature in AIREST feature sets.
+
+- Strongest future prediction target:
+  Depression, especially when blink is combined with other ocular or behavioral features.
+
+- Possible but less mature future target:
+  PTSD, especially if AIREST uses standardized cognitive-control or emotional-conflict tasks rather than only passive observation.
+
+- Weakest current target:
+  Broad anxiety-disorder detection, because the literature is still too thin.
+
+In practical model terms, the review supports:
+- multimodal prediction
+- task-sensitive modeling
+- quality-controlled capture
+- person-level validation
+- cautious interpretation of internal task-specific accuracy reports
+
+It does not support:
+- one universal blink-rate cutoff for psychiatric diagnosis
+- using blink rate alone for screening decisions
+- treating blink rate as a disorder-specific marker without task context
+
+## Engineering implications for AIREST
+
+The review is directly relevant to what AIREST should store and derive.
+
+Recommended AIREST blink feature set:
+- blink count
+- blink rate
+- inter-blink intervals
+- blink duration
+- blink variability / burstiness
+- task-modulated blink change if AIREST has multiple task segments
+- extraction quality flags for poor lighting, occlusion, glasses glare, or face-loss windows
+
+Reason:
+- The review repeatedly suggests that the clinically useful signal is richer than a single `blinks/minute` number.
+- Engineering studies in the review also indicate that broader feature sets outperform simple raw blink rate alone.
+
+Important limitation for current OpenWillis output:
+- `eye_blink_rate()` already gives count, rate, and event timing.
+- It does not directly provide inter-blink variability, burstiness, or explicit duration columns.
+- Those should be derived downstream in AIREST from the blink event table.
+
+## Research caution for product claims
+
+AIREST should avoid overstating this feature.
+
+Claims that are supported by the review:
+- Blink is a relevant psychophysiological feature.
+- Blink has the strongest direct psychiatric evidence in depression.
+- Blink may add value to multimodal prediction systems.
+- Blink behavior is sensitive to task context and recording conditions.
+
+Claims that are not currently supported:
+- Blink rate alone can diagnose PTSD, MDD, or anxiety disorders.
+- There is a validated clinical blink threshold with known sensitivity/specificity for these disorders.
+- Webcam blink rate from ordinary short clips is already clinically validated for psychiatric detection.
+
+## Suggested AIREST wording
+
+If AIREST needs a short internal framing:
+
+- Blink rate should be treated as a low-cost, clinically relevant auxiliary feature with the strongest current evidence in depression, emerging task-sensitive relevance for PTSD, and only preliminary support in anxiety disorders.
+- Future psychiatric prediction work in AIREST should use blink as one component of a broader ocular and behavioral biomarker panel rather than as a stand-alone detector.
