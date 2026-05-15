@@ -18,9 +18,9 @@ cd /Users/pelmeshek1706/Desktop/projects/airest-voice
 /Users/pelmeshek1706/Desktop/projects/final_airest_voice/airest/.venv/bin/python -m venv .venv
 source .venv/bin/activate
 
-python -m pip install --upgrade pip setuptools wheel
-python -m pip install -r openwillis-face/requirements.txt
-python -m pip install -e openwillis-face
+python3 -m pip install --upgrade pip setuptools wheel
+python3 -m pip install -r openwillis-face/requirements.txt
+python3 -m pip install -e openwillis-face
 ```
 
 ## 2) Pin compatible Torch stack
