@@ -189,6 +189,19 @@ OpenWillis currently gives AIREST:
 - Blink event timing with start, peak, end in both frames and seconds: yes
 - Inter-blink intervals: no, derive separately in AIREST
 
+## Blink QC Review
+
+`eye_blink_rate()` does not apply its own quality gate. It uses the FPS reported by OpenCV for timing, skips frames where MediaPipe FaceMesh does not return a face, computes EAR only when both eye landmark sets are available, and falls back to `NaN` outputs when extraction fails completely. Apply the following minimum QC checks before using blink features downstream.
+
+| Check | Minimum review rule | Why it matters | What to do on failure |
+| --- | --- | --- | --- |
+| FPS | Require stable delivered FPS `>= 25`. Treat repeated drops below `25 fps`, obvious frame jitter, or obviously duplicated frames as low-confidence. `30 fps` is acceptable; `50-60 fps` is preferred. | Blink timing is derived by dividing frame index by FPS, and short blinks are under-sampled at low frame rates. | Mark the blink review `unreliable`. Do not use blink timing, duration, or inter-blink interval features. For production review, drop the full blink feature set rather than trying to repair it. |
+| Face-present ratio | Require `face_present_ratio >= 0.80`, where `face_present_ratio = frames with a detectable face / total video frames`. | The blink code counts duration over the full clip, but frames with no detected face are skipped before EAR is added. Long face-loss windows can therefore bias blink rate downward. | Mark the blink review `unreliable` and exclude blink-derived features from downstream use. |
+| Eye-landmark availability | Require `eye_landmark_ratio >= 0.90`, where `eye_landmark_ratio = frames with both left and right eye landmark sets / face-present frames`. | The EAR trace depends on the fixed six-point MediaPipe landmark sets for each eye. There is no interpolation or fallback path when those landmarks are missing. | Mark the blink review `unreliable` and exclude blink-derived features from downstream use. |
+| Missing EAR ratio | Require `missing_ear_ratio <= 0.20`, where `missing_ear_ratio = NaN EAR rows / rows in the returned EAR table`. Treat an all-`NaN` EAR trace as extraction failure. | A high missing-EAR rate means the normalized EAR signal is too sparse or too unstable for trustworthy blink detection. | If the EAR trace is all `NaN`, record blink features as unavailable. If missing EAR exceeds `20%`, mark the blink review `unreliable` and do not use blink features downstream. |
+
+When blink features are unavailable or unreliable, do not impute zeros. Store `blinks`, `blink_rate`, and any derived blink timing features as missing (`NaN`), retain the raw output only for audit/debugging, and set an explicit QC flag such as `blink_qc = failed` or `blink_qc = unreliable`.
+
 ## Research notes for AIREST clinical relevance
 
 This section summarizes the user-provided research review:
