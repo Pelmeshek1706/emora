@@ -2,18 +2,21 @@
 # website:   http://www.bklynhlth.com
 
 # import the required packages
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 
 import cv2
+import os
+
+# Work around intermittent hangs in py-feat's XGBoost AU detector on macOS by
+# forcing single-threaded OpenMP execution before py-feat/xgboost are imported.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
 
 import feat
 from feat.utils import FEAT_EMOTION_COLUMNS
 from feat.pretrained import AU_LANDMARK_MAP
-
-import os
 import logging
 
 from .util import get_speaking_probabilities, split_speaking_df, get_summary, create_cropped_frame
@@ -23,6 +26,25 @@ logger = logging.getLogger()
 
 BBoxDict = Dict[str, Any]
 BBoxList = List[BBoxDict]
+_DETECTOR: Optional[Any] = None
+PROGRESS_LOG_EVERY = 10
+
+
+def _get_detector() -> Any:
+    """
+    Return a shared py-feat detector instance.
+
+    Reusing the detector avoids repeated model initialization, which can stall
+    when a second Detector() is created in the same Python process after a
+    previous video run.
+    """
+
+    global _DETECTOR
+
+    if _DETECTOR is None:
+        _DETECTOR = feat.Detector()
+
+    return _DETECTOR
 
 
 def bb_dict_to_bb_list(bb_dict: BBoxDict) -> List[List[List[float]]]:
@@ -217,24 +239,37 @@ def run_pyfeat(path: str, skip_frames: int = 5, bbox_list: BBoxList = []) -> Lis
     ------------------------------------------------------------------------------------------------------
     """
 
+    cap = None
+    df_list = []
+
     try:
         # init pyfeat
         emo_cols = FEAT_EMOTION_COLUMNS + AU_LANDMARK_MAP['Feat']
-        detector = feat.Detector()
+        detector = _get_detector()
 
         cap = cv2.VideoCapture(path)
         num_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         len_bbox_list = len(bbox_list)
         fps = cap.get(cv2.CAP_PROP_FPS)
+        sampled_frames = (num_frames + skip_frames) // (skip_frames + 1) if skip_frames >= 0 else num_frames
 
-        df_list = []
         frame = 0
         n_frames_skipped = skip_frames
+        processed_frames = 0
 
         bbox_list_passed = len_bbox_list > 0
 
         if bbox_list_passed & (num_frames != len_bbox_list):
             raise ValueError('Number of frames in video and number of bounding boxes do not match')
+
+        logger.info(
+            "Starting emotional expressivity video pass path=%s total_frames=%s sampled_frames_approx=%s fps=%.3f skip_frames=%s",
+            path,
+            num_frames,
+            sampled_frames,
+            fps,
+            skip_frames,
+        )
 
         while True:
 
@@ -277,6 +312,21 @@ def run_pyfeat(path: str, skip_frames: int = 5, bbox_list: BBoxList = []) -> Lis
 
                         df_emotion = pd.concat([df_common, df_emo], axis=1)
 
+                    processed_frames += 1
+                    if (
+                        processed_frames == 1
+                        or processed_frames % PROGRESS_LOG_EVERY == 0
+                        or frame >= num_frames - 1
+                    ):
+                        logger.info(
+                            "Emotional expressivity progress path=%s processed_sampled_frames=%s approx_total_sampled_frames=%s current_frame=%s/%s",
+                            path,
+                            processed_frames,
+                            sampled_frames,
+                            frame,
+                            num_frames,
+                        )
+
             except Exception as e:
                 logger.info(f'error processing frame: {frame} in file: {path} & Error: {e}')
                 df_emotion = get_undected_emotion(frame, emo_cols, fps)
@@ -289,6 +339,16 @@ def run_pyfeat(path: str, skip_frames: int = 5, bbox_list: BBoxList = []) -> Lis
         logger.info(f'Face error process file in pyfeat for file:{path} & Error: {e}')
 
     finally:
+        if cap is not None:
+            cap.release()
+
+        if len(df_list) > 0:
+            logger.info(
+                "Finished emotional expressivity video pass path=%s generated_rows=%s",
+                path,
+                len(df_list),
+            )
+
         # Empty dataframe in case of insufficient datapoints
         if len(df_list) == 0:
             df_emotion = pd.DataFrame(columns=emo_cols)
@@ -397,6 +457,8 @@ def baseline(
     if not os.path.exists(base_path):
         return df_emo
 
+    logger.info("Starting baseline normalization with baseline video path=%s", base_path)
+
     df_common = df_emo[['frame', 'time', 'mouth_openness']]
     df_emo.drop(columns=['frame', 'time', 'mouth_openness'], inplace=True)
 
@@ -417,6 +479,8 @@ def baseline(
         df_emo = df_emo.div(base_df.iloc[0])
 
     df_emotion = pd.concat([df_common, df_emo], axis=1)
+
+    logger.info("Finished baseline normalization with baseline video path=%s", base_path)
 
     return df_emotion
 
