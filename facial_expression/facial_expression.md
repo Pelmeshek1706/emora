@@ -239,6 +239,46 @@ Interpretation:
 - positive values mean more movement than baseline
 - negative values mean less movement than baseline
 
+## Baseline dependency note for AIREST
+
+There are two different normalization concepts in this pipeline, and they are not interchangeable:
+
+- `normalize=True` is geometric landmark normalization inside the analyzed clip itself:
+  - center on `lmk001`
+  - scale by inter-eye distance
+  - optionally rotate if `align=True`
+  - source: [`face_landmark.py` lines 1093-1096](/Users/pelmeshek1706/Desktop/projects/airest-face/openwillis-face/src/openwillis/face/face_landmark.py#L1093)
+- baseline normalization is a second step that only happens when `baseline_filepath` exists on disk
+  - source: [`face_landmark.py` lines 749-763](/Users/pelmeshek1706/Desktop/projects/airest-face/openwillis-face/src/openwillis/face/face_landmark.py#L749)
+
+Operationally, this means a separate baseline video is **not** required to get usable `facial_expressivity` outputs. A standard session without a baseline clip still produces:
+
+- normalized landmark trajectories if `normalize=True`
+- raw frame-to-frame displacement features
+- region summaries such as `overall`, `upper_face`, `lower_face`, `lips`, `eyebrows`
+- `mouth_openness`
+
+What you do **not** get without a baseline clip is a meaningful within-subject "change from baseline" feature. The code checks `os.path.exists(baseline_filepath)` inside `get_displacement()`. If the file is missing, baseline correction is skipped with no warning, and the run silently falls back to absolute displacement values.
+
+In other words, you still get a normalized face image/coordinate space from `normalize=True`, but you do not get a signal normalized against the participant's own neutral or resting state.
+
+So the dependency is:
+
+- baseline clip not required for facial movement features in general
+- baseline clip required for subject-relative interpretation such as "more expressive than this participant's resting state"
+
+Important implementation caveat:
+
+- even when `normalize=True`, the current `baseline()` helper computes baseline displacement from the raw baseline landmark table before forming the baseline mean
+- that makes the baseline-relative ratio directionally useful, but not methodologically clean enough to treat as a production-grade normalized biomarker without further validation
+
+Recommendation for AIREST:
+
+- if the standard AIREST session does not include a dedicated baseline clip, treat `facial_expressivity` as an absolute movement signal only
+- do not describe those outputs as baseline-normalized reactivity
+- do not assume cross-person comparability is solved just because `normalize=True`
+- if AIREST needs interpretable within-person normalized features, add a short neutral/rest baseline recording to the session or implement a different explicit reference-normalization strategy
+
 ## Why nulls appear in the demo
 
 In the validated local run:
