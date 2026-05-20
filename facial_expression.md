@@ -294,6 +294,33 @@ In this sample clip:
 
 This is still a movement signal, not an affect label.
 
+## Research context from the PDF
+
+Source:
+
+- `Facial Expressivity Features and Biomarkers for PTSD, Depression, and Anxiety Disorders.pdf`
+
+The paper frames facial expressivity as a candidate digital biomarker for screening and monitoring, not as a standalone diagnostic test. Its main cross-disorder conclusion is that temporal facial dynamics are more useful than static frames.
+
+Key points that map onto this implementation:
+
+- depression-related facial markers are usually described as reduced positive expressivity, lower overall facial variability, smoother temporal dynamics, reduced head movement, and altered AU patterns such as lower AU12/AU15 and higher AU14
+- anxiety-disorder signals are thinner but promising, especially gaze behavior, head pose, facial landmarks, and selected AUs during social interaction
+- PTSD facial-video evidence is the sparsest of the three groups, and the field is still building datasets and benchmarks
+- across the reviewed papers, AUs, landmarks, head motion/pose, gaze/eye measures, and temporal modeling are more common and more actionable than microexpression-only pipelines
+
+Benchmark results highlighted in the paper:
+
+- `AnxietyFaceTrack` on 91 participants reported `91.0%` multiclass accuracy and `92.33%` average binary accuracy using head position, landmarks, eye movements, and AUs
+- `PTSD in the Wild` used `634` total videos inferred from the published split counts (`317` PTSD / `317` non-PTSD) and reported a visual baseline test accuracy, precision, recall, and F1 of `0.82` with `ResNet50v2 + LSTM`
+- the paper also notes that depression work is the most mature area, with repeated findings around reduced positive expressivity and reduced facial reactivity in challenge and naturalistic datasets
+
+Practical read-through for this repo:
+
+- `facial_expressivity` fits the paper’s recommended direction because it measures temporal movement, region-level dynamics, and within-person baseline change
+- the outputs here are better interpreted as movement biomarkers than disorder labels
+- if you use the paper as background, the strongest fit is the baseline-vs-current comparison and the speaking/non-speaking split, not a direct claim of psychiatric diagnosis
+
 ## Is the current implementation technically bad?
 
 Not fundamentally bad, but not production-tight.
