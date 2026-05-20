@@ -8,31 +8,62 @@ Local implementation reviewed here:
 
 - `openwillis-face/src/openwillis/face/facial_emotion.py`
 - `openwillis-face/src/openwillis/face/util/speaking_utils.py`
+- `openwillis-face/src/openwillis/face/config/facial.json`
+- `demo_openwillis_face.ipynb`
+- `README.md`
 
-This note combines:
+Companion notes in this folder:
+
+- `emotional_expressivity_feature_inventory.md`
+- `airest_openwillis_emotional_expressivity_decision_matrix.md`
+
+This note follows the style and depth of the `facial_expression/` documentation. It combines:
 
 - the upstream OpenWillis method description
-- the actual code in this repo
-- results from the local demo notebook run
+- the actual local code path
+- the local demo notebook behavior
+- output schema details
+- known implementation caveats
+- AIREST-specific product guidance
 
 ## What this feature is for
 
-`emotional_expressivity` is the label-based face signal in OpenWillis.
+`emotional_expressivity` is the label-based face-analysis signal in OpenWillis.
 
-Unlike `facial_expressivity`, which measures movement magnitude, this function tries to characterize:
+It tries to answer:
 
-- emotion-like facial judgments
-- action unit activations
-- mouth openness
-- optional speaking vs not-speaking summaries
+- which emotion-like categories the py-feat model assigns to each sampled face frame
+- which facial action units are active
+- how mouth opening changes over time
+- whether the output should be summarized during speaking vs not speaking
+- how a task clip differs from an optional baseline clip
 
-This is the function to use when you want interpretable expression categories or AU traces, not just movement intensity.
+It is different from `facial_expressivity`.
+
+- `facial_expressivity` measures facial movement magnitude from MediaPipe landmarks.
+- `emotional_expressivity` runs a heavier py-feat model stack and emits semantic labels and AUs.
+
+Use this function when you need interpretable emotion-category or AU traces. Use `facial_expressivity` when you only need movement intensity and want the more stable local pipeline.
+
+## What this feature is not
+
+This output is not a diagnostic result.
+
+It should not be interpreted as:
+
+- a clinical diagnosis
+- a direct measure of true internal emotion
+- a disorder-specific risk score
+- a cross-person normalized affect score
+- a realtime session-gating signal
+
+The labels are model outputs from video frames. They can be useful as research features, exploratory summaries, and offline benchmarks, but they need careful interpretation.
 
 ## Upstream docs vs local code
 
 The upstream docs describe:
 
-- emotion judgments for:
+- 7 emotion outputs:
   - happiness
   - sadness
   - anger
@@ -41,30 +72,29 @@ The upstream docs describe:
   - surprise
   - neutral
 - raw emotion scores on a `0-100` scale
-- raw action unit values on a `0-1` scale
+- action unit values on a `0-1` style scale
+- optional baseline correction
 - optional speaking split
-- a `frames_per_second` style sampling control
+- a frame-sampling control
+- a summary table
 
-The local code matches the general method, but with important implementation differences:
+The local implementation broadly follows that intent, but several details matter:
 
-- the local function signature uses `skip_frames`, not `frames_per_second`
-- the final output only contains frames that survive detection and `dropna()`
-- baseline normalization behaves differently from what a user would expect from the docs
+1. The local public API uses `skip_frames`, not `frames_per_second`.
+2. The function creates one internal row per source frame, fills skipped or failed frames with `NaN`, then drops null rows before returning.
+3. The final returned framewise table contains only sampled frames that survived detection.
+4. Baseline mode changes emotion and AU values from raw model scores into relative-to-baseline transformed values.
+5. In baseline mode, `summary` and returned `framewise` are not on the exact same transformed scale.
+6. The docstring mentions an overall expressivity column, but the code does not compute one.
 
-## Demo notebook call
-
-Notebook file:
-
-- `demo_openwillis_face.ipynb`
-
-Relevant cell:
+## Public API
 
 ```python
 import openwillis.face as owf
 
 framewise, summary = owf.emotional_expressivity(
-    filepath='video.mov',
-    baseline_filepath='/Users/pelmeshek1706/Downloads/baseline (1).mp4',
+    filepath="video.mov",
+    baseline_filepath="sample_data/baseline.mp4",
     bbox_list=[],
     base_bbox_list=[],
     skip_frames=5,
@@ -73,32 +103,79 @@ framewise, summary = owf.emotional_expressivity(
 )
 ```
 
-Important repo-specific note:
+Arguments:
 
-- the notebook baseline path points outside the repo
-- in this workspace that file is not present
-- if you run the notebook exactly as written here, the function silently behaves as if no baseline was supplied
+| Argument | Type | Default | Local behavior |
+| --- | --- | --- | --- |
+| `filepath` | `str` | required | Main video path. |
+| `baseline_filepath` | `str` | `""` | Optional baseline video path. Baseline correction happens only if this path exists on disk. |
+| `bbox_list` | `list[dict]` | `[]` | Optional per-frame face bounding boxes for the main video. If provided, length must match source frame count. |
+| `base_bbox_list` | `list[dict]` | `[]` | Optional per-frame face bounding boxes for the baseline video. |
+| `skip_frames` | `int` | `5` | Analyze one frame, skip the next `skip_frames` frames, then repeat. Use nonnegative values. |
+| `split_by_speaking` | `bool` | `False` | If true, adds speaking probability and creates speaking/not-speaking summary columns. |
+| `rolling_std_seconds` | `int` | `3` | Window size used by the mouth-openness speaking proxy. |
 
-For the validated run below, the same call was executed with:
+Returns:
 
-- `baseline_filepath='sample_data/baseline.mp4'`
+| Return value | Type | Meaning |
+| --- | --- | --- |
+| `framewise` | `pandas.DataFrame` | Per-sampled-frame emotion, AU, and mouth-openness features after `dropna()`. |
+| `summary` | `pandas.DataFrame` | One-row mean/std summary over measured feature columns, optionally split by speaking state. |
+
+## Demo notebook call
+
+Notebook file:
+
+- `demo_openwillis_face.ipynb`
+
+Notebook pattern:
+
+```python
+import openwillis.face as owf
+
+framewise, summary = owf.emotional_expressivity(
+    filepath="video.mov",
+    baseline_filepath="/Users/pelmeshek1706/Downloads/baseline (1).mp4",
+    bbox_list=[],
+    base_bbox_list=[],
+    skip_frames=5,
+    split_by_speaking=False,
+    rolling_std_seconds=3,
+)
+```
+
+Important workspace note:
+
+- the notebook baseline path points outside this repo
+- the path may not exist on another machine
+- the local code silently skips baseline correction when the path does not exist
+- for validated local documentation, use `sample_data/baseline.mp4`
 
 ## Demo result in this workspace
 
-Input media:
+Validated input setup:
 
 - main video: `video.mov`
 - baseline video: `sample_data/baseline.mp4`
-- main video fps: `30`
 - main video frame count: `644`
+- main video fps: `30`
 - `skip_frames=5`
+- `split_by_speaking=False`
 
 Returned objects:
 
 - `framewise.shape == (108, 30)`
 - `summary.shape == (1, 56)`
 
-Returned framewise columns:
+Why `108` rows:
+
+- frame `0` is analyzed
+- then five frames are skipped
+- then frame `6` is analyzed
+- this repeats through frame `642`
+- `644` source frames at a stride of `6` produce `108` sampled frames
+
+Observed framewise columns in the baselined run:
 
 - `frame`
 - `time`
@@ -131,46 +208,34 @@ Returned framewise columns:
 - `AU28`
 - `AU43`
 
-Observed summary values from the baselined run:
+Observed summary shape:
 
-### Emotion summary columns
-
-| Metric | Value |
-| --- | ---: |
-| `surprise_mean` | `24.191500` |
-| `anger_mean` | `7.465008` |
-| `happiness_mean` | `4.830577` |
-| `fear_mean` | `3.815408` |
-| `disgust_mean` | `1.101504` |
-| `sadness_mean` | `0.820626` |
-| `neutral_mean` | `0.307490` |
-
-### Highest AU summary columns
-
-| Metric | Value |
-| --- | ---: |
-| `AU25_mean` | `1.682072` |
-| `AU20_mean` | `1.527778` |
-| `AU26_mean` | `1.325430` |
-| `AU10_mean` | `1.311244` |
-| `AU12_mean` | `1.217659` |
-| `AU14_mean` | `1.188605` |
-| `AU06_mean` | `1.115396` |
-| `AU28_mean` | `0.977249` |
-
-Interpretation caveat:
-
-- these are the summary values returned by the current implementation
-- in a baselined run they are not clean probabilities
-- some of these values become very large because the local baseline normalization divides by baseline means that can be close to zero
-
-So the pattern is informative, but the absolute magnitudes should be treated cautiously.
+- 28 measured features
+- 2 statistics per feature
+- 56 total summary columns
 
 ## Feature inventory
 
-### 1. Emotion outputs
+### 1. Frame metadata
 
-The local runtime exposes these emotion columns:
+Every returned framewise row includes:
+
+- `frame`
+- `time`
+
+`frame` is the original source-video frame number, not a compact sampled-frame index.
+
+`time` is computed as:
+
+```text
+frame / source_video_fps
+```
+
+That means returned rows keep the source-video temporal coordinate even after skipped rows are dropped.
+
+### 2. Emotion outputs
+
+The local runtime emits these 7 emotion columns:
 
 - `anger`
 - `disgust`
@@ -180,23 +245,31 @@ The local runtime exposes these emotion columns:
 - `surprise`
 - `neutral`
 
+Source of names:
+
+- `feat.utils.FEAT_EMOTION_COLUMNS`
+
 How they are produced:
 
-- `py-feat` estimates face-level emotion scores
-- the local code multiplies them by `100`
+1. `feat.Detector().detect_faces(...)` detects faces.
+2. `detector.detect_landmarks(...)` estimates landmarks.
+3. `detector.detect_emotions(...)` emits model emotion scores.
+4. Local code multiplies the py-feat emotion scores by `100`.
 
 Without baseline:
 
-- they are best read as model scores on a `0-100` style scale
+- these are py-feat model scores on a `0-100` style scale
+- they are easiest to inspect and plot in this mode
 
 With baseline:
 
-- they become relative-to-baseline transformed values
-- they are no longer plain probabilities or percentages
+- these become relative-to-baseline values
+- they should not be called raw probabilities or percentages
+- values can exceed ordinary `0-100` expectations after normalization artifacts
 
-### 2. Action-unit-related outputs
+### 3. Action unit outputs
 
-The local runtime exposes these AU columns:
+The local runtime emits these 20 AU columns:
 
 - `AU01`
 - `AU02`
@@ -219,217 +292,547 @@ The local runtime exposes these AU columns:
 - `AU28`
 - `AU43`
 
-These are taken from `feat.pretrained.AU_LANDMARK_MAP['Feat']`.
+Source of names:
+
+- `feat.pretrained.AU_LANDMARK_MAP["Feat"]`
+
+How they are produced:
+
+1. py-feat landmarks are estimated for the detected face.
+2. `detector.detect_aus(frame, landmarks)` emits AU values.
+3. The values are appended after the emotion columns.
 
 Without baseline:
 
-- the upstream docs describe them as `0-1` style activations
+- the upstream docs describe AU outputs as `0-1` style activations
 
 With baseline:
 
-- they become relative-to-baseline transformed values
+- the returned AU columns are relative-to-baseline transformed values
+- they are no longer direct raw AU activations
 
-### 3. `mouth_openness`
+### 4. `mouth_openness`
 
-The function also adds:
+The function adds:
 
 - `mouth_openness`
 
-How it is produced in the local code:
+How it is computed in this module:
 
-- upper lip landmarks: `[61, 62, 63]`
-- lower lip landmarks: `[65, 66, 67]`
-- average Euclidean distance across those matched lip point pairs
+- upper lip landmark indices: `[61, 62, 63]`
+- lower lip landmark indices: `[65, 66, 67]`
+- for each pair, compute 2D Euclidean distance
+- return the mean of those three distances
 
-This feature is both:
+This differs from the `facial_expressivity` mouth-openness ratio. In `emotional_expressivity`, the feature is a simple average lip-distance measurement from py-feat landmarks.
 
-- a useful mouth-related signal
-- the basis for the optional speaking split
+Uses:
 
-### 4. `summary`
+- standalone mouth-activity feature
+- speaking-probability proxy input
 
-The local summary contains:
+Baseline caveat:
+
+- `mouth_openness` is excluded from the baseline ratio step
+- but it is still shifted down by `1` in the final returned framewise table when a baseline file exists
+- the summary is computed before that final shift
+
+### 5. Optional `speaking_probability`
+
+If `split_by_speaking=True`, `framewise` also gets:
+
+- `speaking_probability`
+
+The speaking proxy is computed by `get_speaking_probabilities()`:
+
+1. infer fps from differences in the internal `time` column before final `dropna()`
+2. compute rolling standard deviation of `mouth_openness`
+3. fit a 2-component Gaussian mixture model
+4. treat the higher-variance component as speaking-like
+5. return probability of belonging to that component
+
+Important caveats:
+
+- this is not audio VAD
+- it is a mouth-motion proxy
+- because skipped frames still have metadata rows internally, the inferred fps usually reflects source-video fps rather than the final returned sampled-row rate
+- it can confuse non-speech mouth movement with speaking
+- it depends on enough sampled frames to fit a 2-component model
+- after `dropna()`, early rolling-window rows can be removed
+
+## Output schemas
+
+### No-baseline framewise schema
+
+When no baseline file exists, the natural output order is:
+
+1. `frame`
+2. `time`
+3. 7 emotion columns
+4. 20 AU columns
+5. `mouth_openness`
+6. optional `speaking_probability`
+
+### Baselined framewise schema
+
+When the baseline path exists, the baseline helper reconstructs the dataframe with this order:
+
+1. `frame`
+2. `time`
+3. `mouth_openness`
+4. 7 emotion columns
+5. 20 AU columns
+6. optional `speaking_probability`
+
+Do not rely on column position alone. Prefer column names.
+
+### Summary schema without speaking split
+
+The summary is a one-row dataframe.
+
+It contains mean and standard-deviation columns for every feature after `frame` and `time`:
 
 - `mouth_openness_mean`
-- 7 emotion means
-- 20 AU means
+- 7 emotion `_mean` columns
+- 20 AU `_mean` columns
 - `mouth_openness_std`
-- 7 emotion std columns
-- 20 AU std columns
+- 7 emotion `_std` columns
+- 20 AU `_std` columns
 
-That is:
+Total:
 
-- `28` measured features
-- `56` summary columns total
+- 28 feature columns x 2 statistics = 56 columns
 
-If `split_by_speaking=True`, each feature is duplicated into:
+### Summary schema with speaking split
+
+If `split_by_speaking=True`, summary columns are duplicated as:
 
 - `[feature]_[stat]_speaking`
 - `[feature]_[stat]_not_speaking`
 
-## How the algorithm produces the outputs
+Examples:
 
-### Frame sampling
+- `happiness_mean_speaking`
+- `happiness_mean_not_speaking`
+- `AU12_std_speaking`
+- `AU12_std_not_speaking`
+- `mouth_openness_mean_speaking`
+- `mouth_openness_mean_not_speaking`
 
-The local code samples frames with `skip_frames`.
+The summary does not include a summary of `speaking_probability` itself because the split helper drops the split column before computing statistics.
 
-For `skip_frames=5`:
+## Algorithm walkthrough
 
-- analyze one frame
-- skip the next five
-- analyze the next one
+### Detector setup
 
-On a `644`-frame video, that produces about:
+The module sets:
 
-- `108` analyzed frames
+```python
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+```
 
-This matches the validated run exactly.
+before importing `feat`. This is a local workaround for intermittent macOS hangs in py-feat's XGBoost AU detector.
+
+The code also uses a shared module-level detector:
+
+```python
+_DETECTOR = None
+
+def _get_detector():
+    global _DETECTOR
+    if _DETECTOR is None:
+        _DETECTOR = feat.Detector()
+    return _DETECTOR
+```
+
+This avoids repeatedly constructing `feat.Detector()` in one Python process.
+
+### Per-video pass
+
+`emotional_expressivity()` calls:
+
+```text
+get_emotion() -> run_pyfeat()
+```
+
+`run_pyfeat()`:
+
+1. opens the video with `cv2.VideoCapture`
+2. reads source frame count and fps
+3. builds emotion/AU column names from py-feat
+4. initializes or reuses the shared detector
+5. walks the video frame by frame
+6. analyzes sampled frames
+7. creates `NaN` rows for skipped or failed frames
+8. returns a list of one-row dataframes
+
+`get_emotion()` concatenates that list into a single dataframe.
+
+### Sampling behavior
+
+For valid nonnegative `skip_frames` values, the effective stride is:
+
+```text
+stride = skip_frames + 1
+```
+
+Examples:
+
+| `skip_frames` | Behavior |
+| ---: | --- |
+| `0` | Analyze every frame. |
+| `1` | Analyze every other frame. |
+| `5` | Analyze frame 0, skip 1-5, analyze 6, and repeat. |
+| `29` | Approximate one frame per second for a 30 fps source video. |
+
+This is a frame-stride sampler, not a target-fps sampler. If the source video fps changes, the wall-clock sampling interval changes too.
 
 ### Per-sampled-frame processing
 
-For each sampled frame:
+For each sampled frame without an external bbox:
 
-1. detect face
-2. detect landmarks
-3. detect AUs
-4. detect emotions
-5. compute `mouth_openness`
+```text
+detect_emotions()
+  -> detector.detect_faces(frame, threshold=0.95)
+  -> detector.detect_landmarks(frame, detected_faces=faces)
+  -> detector.detect_aus(frame, landmarks)
+  -> detector.detect_emotions(frame, faces, landmarks)
+  -> mouth_openness(landmarks)
+```
 
-The implementation uses `py-feat` for the face, landmark, AU, and emotion passes.
+Emotion scores are multiplied by `100`.
 
-### Summary generation
+The emotion and AU arrays are horizontally stacked into one row, and `mouth_openness` is added as a final scalar.
 
-The function computes a one-row summary table using:
+### External bounding boxes
 
-- mean of each feature
-- standard deviation of each feature
+If `bbox_list` is passed:
 
-## Why nulls happen in the demo
+- it must contain one bbox dictionary per original video frame
+- expected keys are `bb_x`, `bb_y`, `bb_w`, and `bb_h`
+- if `bb_x` is `NaN`, the frame is treated as undetected
+- otherwise the frame is cropped before py-feat detection
 
-This is the main reason users get confused by this function.
+Important bug:
 
-### Internal raw behavior
+- `bb_dict_to_bb_list()` returns `bb_y + bb_y` for the bottom coordinate
+- the intended value is almost certainly `bb_y + bb_h`
+- this helper is not used in the default notebook call, which passes empty bbox lists
 
-Inside `run_pyfeat()` and `get_emotion()`:
+### Baseline behavior
 
-- one row is created for every original video frame
-- skipped frames are filled with `NaN` features
-- sampled frames contain emotion/AU data if detection succeeds
+Baseline correction happens only when:
 
-For this demo:
+```python
+os.path.exists(baseline_filepath)
+```
 
-- total original frames: `644`
-- sampled frames with data: `108`
-- intentionally skipped frames: `536`
+If the baseline file does not exist, no warning is raised and the function silently returns no-baseline output.
 
-So the internal raw table contains `536` rows of expected null features.
+When the baseline exists:
 
-Those null rows are not failures.
-They are how the sampling strategy is implemented.
+1. copy the main dataframe
+2. preserve `frame`, `time`, and `mouth_openness`
+3. remove `frame`, `time`, and `mouth_openness` from the normalization columns
+4. run `get_emotion()` on the baseline video
+5. compute baseline means for emotion and AU columns
+6. add `1` to the baseline means
+7. add `1` to the main emotion/AU values
+8. divide main values by baseline means
+9. reattach `frame`, `time`, and `mouth_openness`
+10. compute summary
+11. subtract `1` from the whole returned framewise dataframe
+12. add `1` back only to `frame`, `time`, and optionally `speaking_probability`
+13. drop rows containing `NaN`
+14. reset the index
 
-### Final public behavior
+For emotion and AU columns, the intended final formula is:
 
-`emotional_expressivity()` then runs:
+```text
+((main_value + 1) / (baseline_mean + 1)) - 1
+```
 
-- `dropna()`
-- `reset_index(drop=True)`
+Interpretation:
 
-So the final returned `framewise` table:
+- `0` means approximately equal to baseline
+- positive values mean above baseline
+- negative values mean below baseline
 
-- keeps only rows that contain data
-- had `108` rows in this demo
-- had `0` null values in the final validated run
+However, because `summary` is computed before the final subtract-`1` step, the summary and returned framewise values are offset from each other in baseline mode.
 
-### When nulls would indicate a real problem
+## Null and row-retention behavior
 
-If you modify the function or inspect internal raw outputs, additional null rows beyond expected skipped frames would usually mean:
+The internal table has one row per original source frame.
 
+Rows can contain `NaN` because:
+
+- the frame was intentionally skipped by `skip_frames`
 - face detection failed on a sampled frame
-- the frame crop was bad
-- the video frame was unreadable
-- a provided bounding box was invalid
+- the bbox was invalid
+- the frame could not be decoded
+- speaking probability could not be computed for early rolling-window rows
 
-## How to use this feature
+The public function ends with:
 
-Good use cases:
+```python
+df_norm_emo.dropna(inplace=True)
+df_norm_emo.reset_index(drop=True, inplace=True)
+```
 
-- frame-level emotion-like facial traces
-- AU-based analysis when you need more granular facial behavior than emotion labels provide
-- comparing within-subject expression relative to a baseline clip
-- splitting outputs into speaking vs not speaking segments
-- exploratory inspection of expression-rich moments in a video
+So the returned `framewise` table contains only complete rows.
 
-Recommended interpretation workflow:
+For the validated `644`-frame demo with `skip_frames=5`:
 
-1. inspect raw no-baseline output first if you want readable model outputs
-2. use baseline mode only for relative within-subject comparisons
-3. look at AUs together with `mouth_openness`, not in isolation
-4. use speaking split only when the clip genuinely contains speaking and silence
+- internal raw rows: `644`
+- sampled rows: `108`
+- expected skipped rows: `536`
+- final returned rows: `108`
+- final returned null count: `0` in the validated run
+
+If the final returned row count is smaller than expected, likely causes are:
+
+- py-feat face detection failed on some sampled frames
+- the face was occluded or off-camera
+- the crop was wrong
+- the detector threw an exception and the row was replaced with `NaN`
+- `speaking_probability` introduced additional null rows
+
+## Interpreting outputs
+
+### Raw no-baseline mode
+
+Raw mode is best when the goal is:
+
+- plotting model emotion traces
+- reviewing expression-rich moments
+- inspecting AU activations
+- generating interpretable exploratory features
+- benchmarking against another emotion/AU extractor
+
+In this mode:
+
+- emotion columns are model scores on a `0-100` style scale
+- AU columns are py-feat AU outputs
+- `mouth_openness` is the mean lip-distance feature
+
+### Baseline mode
+
+Baseline mode is best when the goal is:
+
+- within-subject comparison
+- current task vs neutral/rest clip
+- current task vs calibration clip
+- relative expression change
+
+In this mode:
+
+- emotion and AU values are relative to baseline
+- `0` is the conceptual no-change point after final framewise shift
+- raw probability interpretation no longer applies
+- near-zero baseline means can create unstable ratios
+
+Baseline mode should only be used when:
+
+- the baseline clip exists
+- the baseline clip is protocol-defined
+- the baseline clip is similar in lighting, camera, pose, and duration
+- output consumers know the values are transformed
+
+### Speaking split mode
+
+Speaking split mode is useful when:
+
+- expression is expected to differ during speech
+- the clip contains clear speech and non-speech segments
+- downstream analysis needs separate summaries for mouth-active intervals
+
+It is weaker when:
+
+- the clip has little silence
+- mouth movement is unrelated to speech
+- frame sampling is too sparse
+- the recording is too short for a stable rolling-window estimate
 
 ## What the demo suggests
 
-Qualitatively, this demo clip looks like a strongly expressive, mouth-active clip.
+The validated baselined demo returned:
 
-Why that conclusion is reasonable:
+- high `surprise_mean` relative to other emotion summary columns
+- high mouth-related AU means, especially around `AU25`, `AU20`, `AU26`, and `AU10`
+- strong mouth activity in sampled frames
 
-- `surprise_mean` is much larger than the other emotion summary columns
-- `AU25`, `AU26`, and `AU10` are elevated, which is consistent with mouth activity
-- `mouth_openness` is also high in many returned frames
+Practical read:
+
+- the clip appears expression-rich and mouth-active
+- the output is analytically useful for exploration
+- the absolute baselined magnitudes should be treated cautiously
 
 What not to over-interpret:
 
-- the exact size of the baselined emotion means
-- the exact size of the baselined AU means
+- exact baselined emotion magnitudes
+- exact baselined AU magnitudes
+- emotion labels as true affective state
+- any disorder inference
 
-The direction of the signal is useful.
-The absolute magnitude is less trustworthy in the current implementation.
+## Research context
 
-## Is the current implementation technically bad?
+Source reviewed in the adjacent documentation set:
 
-It is usable, but it has more technical issues than `facial_expressivity`.
+- `facial_expression/Facial Expressivity Features and Biomarkers for PTSD, Depression, and Anxiety Disorders.pdf`
+
+The relevant lesson for `emotional_expressivity` is that facial video biomarkers are most defensible when they use temporal dynamics, AUs, landmarks, head/eye behavior, and task context rather than isolated static emotion labels.
+
+How this maps to the local function:
+
+- AU outputs are more granular and often more interpretable than emotion labels alone.
+- Emotion labels can be useful exploratory descriptors, but they should be treated as model judgments.
+- Temporal summaries such as mean/std over a task are more useful than a single frame.
+- Speaking-aware summaries may help separate speech-driven mouth movement from other expression changes.
+- Baseline comparison is conceptually useful but the local baseline implementation needs cleanup before production use.
+
+Clinical caution:
+
+- depression, PTSD, and anxiety studies often report group-level patterns, not individual diagnostic certainty
+- demographic, lighting, pose, occlusion, camera quality, and task design can affect model output
+- emotion models trained on general facial-expression datasets may not transfer cleanly to clinical interviews
+
+## AIREST guidance
+
+Recommended AIREST role:
+
+- offline research benchmark
+- optional post-session derived table
+- not a realtime dependency
+- not a clinical gating feature
+- not an MVP diagnostic feature
+
+Why:
+
+- py-feat loads a heavy model stack
+- runtime is slower and more fragile than MediaPipe landmark extraction
+- dependency constraints are narrow
+- baseline behavior is not production-clean
+- face-detection failures are collapsed into dropped rows without quality metadata
+
+Suggested production boundary:
+
+1. Use AIREST-owned realtime capture for video, face QC, frame timestamps, and optional raw landmarks.
+2. Use lightweight MediaPipe-derived features for MVP movement summaries.
+3. Run `emotional_expressivity` offline only when research protocols request emotion/AU features.
+4. Store emotion/AU outputs separately from realtime `facial_features.csv`.
+5. Include processing metadata, model versions, sampling parameters, and missingness metrics.
+
+Recommended artifact names if AIREST adopts this offline feature family:
+
+- `features/emotional_expressivity_framewise.csv`
+- `features/emotional_expressivity_summary.csv`
+- `features/emotional_expressivity_qc.json`
+- `features/emotional_expressivity_meta.json`
+
+## Technical strengths
 
 What is good:
 
-- useful combination of emotion judgments and AUs
-- framewise output is practical for downstream plots and event analysis
-- summary output is compact
-- speaking split is available without needing a separate voice pipeline
+- returns both framewise and summary outputs
+- includes emotion labels and AU-level detail
+- supports optional external bounding boxes
+- supports optional speaking-state summaries
+- reuses the py-feat detector to reduce repeated initialization risk
+- adds progress logging for long video passes
+- emits source frame and time coordinates
 
-What is weak or inconsistent:
+## Technical weaknesses
 
-1. The upstream docs describe a `frames_per_second` control, while the local code uses `skip_frames`.
-2. Baseline normalization is ratio-based, which becomes unstable when baseline emotion means are near zero.
-3. The summary is computed before the final `-1` shift applied to the returned baselined framewise table, so `summary` and `framewise` are not on the same transformed scale.
-4. `mouth_openness` is not baseline-normalized, but in a baselined run it still gets shifted by `-1` because the code subtracts `1` from the whole dataframe and only restores `frame` and `time`.
-5. If `split_by_speaking=True` in a baselined run, `speaking_probability` is also shifted by the same global subtraction/addition pattern.
-6. The docstring mentions overall expressivity, but the function does not actually create a composite or overall emotion column.
-7. The implementation is inefficient because it writes null rows for skipped frames and then drops them later.
-8. There is a bounding-box helper bug in `bb_dict_to_bb_list()`:
-   - it uses `bb_y + bb_y`
-   - it should almost certainly use `bb_y + bb_h`
-   - this does not affect the default notebook path because the notebook passes empty bbox lists
+Important issues:
 
-So the implementation is not unusable, but it is methodologically fragile in baseline mode and needs cleanup.
+1. `skip_frames` is a stride, not a target fps.
+2. skipped frames are represented internally as `NaN` rows and later dropped.
+3. final row count can be smaller than expected without explicit QC output.
+4. baseline paths that do not exist silently disable baseline mode.
+5. baseline ratio normalization is unstable when baseline means are near zero.
+6. summary is computed before final baseline framewise shift.
+7. `mouth_openness` is not baseline-normalized but still shifted in returned baseline framewise output.
+8. `speaking_probability` can introduce additional null rows before final `dropna()`.
+9. the docstring describes an overall expressivity column that does not exist.
+10. `bb_dict_to_bb_list()` appears to compute the bbox bottom coordinate incorrectly.
+11. broad `try/except` blocks log errors but do not expose structured failure state to callers.
+12. no model-version metadata is returned with outputs.
 
 ## Improvements worth adding
 
-1. Replace `skip_frames` with a real `frames_per_second` sampler or make the docs match the code exactly.
-2. Avoid creating null rows for skipped frames; return only sampled frames from the start.
-3. Separate raw outputs from baseline-corrected outputs explicitly.
-4. Compute summary from the final returned framewise table so the two outputs stay on the same scale.
-5. Do not subtract `1` from `mouth_openness` or `speaking_probability`.
-6. Stabilize baseline normalization with an epsilon floor or a different normalization strategy for near-zero baseline means.
-7. Add an explicit composite emotional expressivity measure if the docs are going to reference one.
-8. Warn clearly when the baseline file path does not exist instead of silently switching to no-baseline mode.
-9. Add tests for:
-   - sampling behavior
-   - null row handling
-   - baseline summary consistency
-   - bbox helper correctness
+Highest-value code improvements:
+
+1. Replace `skip_frames` with a real target-fps sampler, or document it everywhere as stride sampling.
+2. Return a QC table or metadata object with:
+   - source frame count
+   - expected sampled frame count
+   - successful sampled frame count
+   - failed sampled frame count
+   - dropped row count
+   - baseline used yes/no
+   - model stack and versions
+3. Warn or raise when a nonempty `baseline_filepath` does not exist.
+4. Compute summary from the final returned framewise table.
+5. Keep `mouth_openness` out of the global subtract-`1` baseline postprocessing.
+6. Add a stable epsilon or alternative transform for near-zero baseline means.
+7. Add an explicit `overall_emotional_expressivity` column only if its formula is defined and validated.
+8. Fix `bb_dict_to_bb_list()` to use `bb_y + bb_h`.
+9. Avoid generating internal rows for skipped frames.
+10. Add tests for schema, sampling, baseline consistency, speaking split, and bbox behavior.
 
 ## Practical guidance
 
-- Use `emotional_expressivity` when you need emotion categories or AU-level features.
-- Use it without baseline when you want outputs that are easiest to interpret.
-- Use it with baseline only when you are intentionally doing relative within-subject comparison and are prepared to inspect normalization artifacts.
-- If you mainly care about overall facial movement rather than emotion labels, `facial_expressivity` is technically cleaner in this repo.
+Use `emotional_expressivity` when:
+
+- you need emotion-category traces
+- you need AU-level features
+- the run is offline or research-oriented
+- you can tolerate model-stack latency
+- you can inspect missingness and normalization behavior
+
+Prefer no-baseline mode when:
+
+- you want easy-to-read model scores
+- you are plotting raw emotion/AU traces
+- no protocol-defined neutral baseline exists
+
+Use baseline mode only when:
+
+- the baseline file is guaranteed to exist
+- the protocol defines what the baseline means
+- you explicitly want within-subject relative values
+- downstream consumers understand the transformed scale
+
+Prefer `facial_expressivity` when:
+
+- you mainly need movement intensity
+- you want a simpler, lighter, more stable pipeline
+- emotion labels are not required
+- outputs may feed an MVP or production-like pipeline
+
+## Source references
+
+Local code:
+
+- `openwillis-face/src/openwillis/face/facial_emotion.py`
+- `openwillis-face/src/openwillis/face/util/speaking_utils.py`
+- `openwillis-face/src/openwillis/face/util/crop_utils.py`
+- `openwillis-face/src/openwillis/face/config/facial.json`
+
+Local docs:
+
+- `README.md`
+- `README_openwillis_upstream.md`
+- `demo_openwillis_face.ipynb`
+- `facial_expression/facial_expression.md`
+- `facial_expression/facial_expressivity_feature_inventory.md`
+- `facial_expression/airest_openwillis_feature_decision_matrix.md`
+
+External model references already captured by the local docs:
+
+- https://huggingface.co/py-feat/resmasknet
+- https://huggingface.co/py-feat/retinaface
+- https://huggingface.co/py-feat/mobilefacenet
+- https://huggingface.co/py-feat/xgb_au
+- https://huggingface.co/py-feat/img2pose
+- https://huggingface.co/py-feat/facenet
