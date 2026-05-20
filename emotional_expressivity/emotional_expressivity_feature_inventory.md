@@ -8,6 +8,7 @@ It is based on:
 - `openwillis-face/src/openwillis/face/util/speaking_utils.py`
 - `facial_expression/facial_expressivity_feature_inventory.md`
 - `emotional_expressivity/emotional_expressivity.md`
+- `emotional_expressivity/Emotional Expressivity Biomarkers for PTSD, Depression, and Anxiety Detection.pdf`
 - `demo_openwillis_face.ipynb`
 - local validation on `video.mov` with `sample_data/baseline.mp4`
 
@@ -312,6 +313,73 @@ The adjacent `facial_expression` inventory records the installed runtime default
 
 For reproducible research output, persist exact package versions and model names at run time rather than assuming these defaults never change.
 
+## Research-backed feature roadmap
+
+The local PDF `Emotional Expressivity Biomarkers for PTSD, Depression, and Anxiety Detection.pdf` argues that the most defensible emotional-expressivity biomarkers are not coarse emotion labels alone. The stronger pattern across depression, PTSD, and anxiety studies is:
+
+- AUs are the strongest common denominator across depression and PTSD work.
+- Head pose and gaze materially improve anxiety-related and depression-related modeling.
+- Temporal dynamics are often clinically meaningful but underrepresented in the current output.
+- Speech-linked mouth movement is a major confound and should be separated with audio VAD when possible.
+- Context matters, especially for PTSD and trauma-related interviews.
+- QC and uncertainty metadata are required before clinical or research interpretation.
+
+### Disorder-specific feature emphasis
+
+| Disorder / state | Most relevant feature families from the PDF | Current local coverage |
+| --- | --- | --- |
+| Depression | Reduced positive expressivity, mouth-corner/smile change, brow activity, AU intensity, head movement, temporal variability and entropy. | Partially covered through emotions/AUs and `mouth_openness`; missing head pose and richer dynamics. |
+| PTSD | Context-sensitive visual arousal, AU sequences, landmarks, gaze, head pose, speech prosody, language content. | Partially covered through AUs/emotions; missing context labels, gaze/head pose, and multimodal fusion. |
+| Anxiety / anxious states | Anger/fear/neutral differences, head rotation, jawline/eye-region movement, gaze cues, tension/arousal dynamics. | Partially covered through anger/fear/neutral and AUs; missing head/eye/gaze families. |
+
+### Evidence highlights from the PDF
+
+| Study | Key quantitative or methodological takeaway |
+| --- | --- |
+| Alghowinem et al., 2013 | Depression head-pose/movement features reached `71.2%` average recognition. |
+| Jiang et al., 2021 | Longitudinal depression interviews produced AUC `0.72` for remission and `0.75` for treatment response using emotions, AUs, and temporal statistics. |
+| Mahayossanunt et al., 2023 | Depression interview model reported accuracy `91.67%` and F1 `88.89%` from gaze, AU, and expression features. |
+| Jin et al., 2025 | E-DAIC video-only F1 `0.853`, AUC `0.912`; multimodal F1 `0.922`, AUC `0.950`; feature contribution ranked AU > pose > audio > gaze. |
+| Schultebraucks et al., 2022 | Trauma-survivor multimodal classifier reported PTSD AUC `0.90`, weighted F1 `0.83`; depression AUC `0.86`, weighted F1 `0.82`. |
+| Aathreya et al., 2025 | Child-PTSD baseline found AU intensities to be the optimal feature family, with classification depending on conversational context. |
+| Ren et al., 2025 | GAD screening showed AUC `0.792` for anger, `0.727` for fear, and `0.723` for neutral. |
+| AnxietyFaceTrack, 2025 preprint | Social-state anxiety model reached multiclass accuracy `0.91`, F1 `0.90`, AUC `0.98`; head rotation and eye/jawline features were important. |
+
+### Recommended additions mapped to this inventory
+
+| Feature group | Concrete variables | Current status | Priority |
+| --- | --- | --- | --- |
+| Core AUs | AU01, AU02, AU04, AU05, AU06, AU07, AU10, AU12, AU14, AU15, AU17, AU20, AU23, AU24, AU25, AU26, eye closure; intensity and presence | Mostly present as py-feat AU columns, but presence/episode summaries are missing. Local py-feat emits `AU43` for eye closure; the PDF's roadmap names `AU45`. | Very high |
+| Valence/arousal proxies | Positive-AU composite, negative-AU composite, neutral proportion, anger/fear/sadness intensity | Not explicitly computed. | Very high |
+| Mouth and speech separation | Mouth openness, lip compression, smile amplitude, speaking probability, non-speaking expressivity | `mouth_openness` and mouth-proxy speaking split exist; audio VAD and active-speaker logic are missing. | Very high |
+| Head dynamics | Yaw, pitch, roll mean/std/range/velocity; nod and shake episode counts | Missing from `emotional_expressivity`. | High |
+| Gaze and eyes | Horizontal/vertical gaze, fixation stability, gaze aversion proportion, blink count, blink duration | Missing from this function; blink is documented separately in `blink_rate/`. | High |
+| Temporal dynamics | Windowed mean/std, coefficient of variation, sample entropy, spectral entropy, autocorrelation, burstiness, transition counts | Only mean/std summaries exist. | Very high |
+| Symmetry and laterality | Left-right AU asymmetry, unilateral smile/brow activity, head-turn bias | Missing. | Medium |
+| Quality and confounds | Detection confidence, missingness ratio, occlusion ratio, illumination flag, speaking ratio | Missing as structured public output. | Very high |
+
+### Recommended windowing and evaluation contract
+
+The PDF recommends a research pipeline with:
+
+- native-frame feature extraction before downsampling
+- resampling to about `10` fps after extraction
+- `2-10` second windows with `50%` overlap
+- both window summaries and raw sequences
+- interpretable baselines such as elastic net or XGBoost
+- sequence models such as BiLSTM or small transformers
+- multimodal fusion across face, audio, and text
+
+Evaluation should report:
+
+- subject-exclusive splits
+- nested cross-validation
+- AUC, F1, balanced accuracy, sensitivity, and specificity
+- calibration metrics such as Brier score or ECE
+- bootstrapped confidence intervals
+- subgroup performance by sex, age, and site
+- exact target definition, such as diagnosis, severity score, or state self-report
+
 ## Missingness and quality fields
 
 The current public return values do not include explicit QC fields.
@@ -437,3 +505,4 @@ Recommended content:
 - `openwillis-face/src/openwillis/face/config/facial.json`
 - `demo_openwillis_face.ipynb`
 - `README.md`
+- `emotional_expressivity/Emotional Expressivity Biomarkers for PTSD, Depression, and Anxiety Detection.pdf`

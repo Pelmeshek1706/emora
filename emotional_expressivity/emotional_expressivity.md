@@ -11,6 +11,7 @@ Local implementation reviewed here:
 - `openwillis-face/src/openwillis/face/config/facial.json`
 - `demo_openwillis_face.ipynb`
 - `README.md`
+- `emotional_expressivity/Emotional Expressivity Biomarkers for PTSD, Depression, and Anxiety Detection.pdf`
 
 Companion notes in this folder:
 
@@ -674,27 +675,69 @@ What not to over-interpret:
 - emotion labels as true affective state
 - any disorder inference
 
-## Research context
+## Research context from the PDF
 
-Source reviewed in the adjacent documentation set:
+Source:
 
-- `facial_expression/Facial Expressivity Features and Biomarkers for PTSD, Depression, and Anxiety Disorders.pdf`
+- `Emotional Expressivity Biomarkers for PTSD, Depression, and Anxiety Detection.pdf`
 
-The relevant lesson for `emotional_expressivity` is that facial video biomarkers are most defensible when they use temporal dynamics, AUs, landmarks, head/eye behavior, and task context rather than isolated static emotion labels.
+The PDF's central conclusion is that emotional expressivity features are promising behavioral biomarkers for psychiatric screening and monitoring, but the evidence is stronger for adjunctive assessment than for stand-alone diagnosis.
 
-How this maps to the local function:
+The strongest cross-study signal is not a generic "emotion score." The more reproducible signals are:
 
-- AU outputs are more granular and often more interpretable than emotion labels alone.
-- Emotion labels can be useful exploratory descriptors, but they should be treated as model judgments.
-- Temporal summaries such as mean/std over a task are more useful than a single frame.
-- Speaking-aware summaries may help separate speech-driven mouth movement from other expression changes.
-- Baseline comparison is conceptually useful but the local baseline implementation needs cleanup before production use.
+- facial action units
+- head-motion dynamics
+- gaze and eye-region behavior
+- temporal variability over time
+- context-aware summaries
+- multimodal fusion with speech, language, and sometimes physiology
+
+That matters for this repo because the current `emotional_expressivity` path has the right starting point, but it is still narrow. It returns py-feat emotions, AUs, and `mouth_openness`, then reduces them mostly to mean/std summaries. The PDF argues for moving from a framewise summary toolbox toward a windowed, sequenced, multimodal biomarker pipeline.
+
+### Disorder-level findings
+
+| Disorder / state | Main findings from the PDF | How it maps to this repo |
+| --- | --- | --- |
+| Depression | Most consistent signals involve reduced positive expressivity, altered brow and mouth activity, reduced movement variability, and lower facial flexibility. | Current emotion/AU output is relevant, but the repo should add temporal dynamics, smile/mouth composites, brow features, and head-pose summaries. |
+| PTSD | Evidence is more context-sensitive and multimodal. Visual arousal markers, facial movement parameters, speech prosody, and language cues jointly outperform single channels. Recent child-PTSD work emphasizes de-identified AU, landmark, gaze, and head-pose sequences. | Current py-feat output should be joined with task context, speech/audio features, and sequence models. AUs are useful, but not enough alone. |
+| Anxiety / anxious states | Signals are less about blunting and more about tension, arousal, vigilance, anger/fear/neutral expression differences, head rotation, jawline/eye-region motion, and gaze cues. | Current emotion labels capture some anger/fear/neutral signal, but head pose, gaze, and eye-region features are missing from the emotional summary path. |
+
+### Study evidence summarized in the PDF
+
+| Study | Population / setting | Feature families | Results or main finding |
+| --- | --- | --- | --- |
+| Alghowinem et al., 2013 | Clinically validated depression videos; exact N not recovered in the inspected source | Head pose and movement | Head-pose/movement features reached `71.2%` average recognition with SVM, showing nonverbal kinematics can carry depression signal. |
+| Harati et al., 2020 | 12 severely depressed patients in repeated DBS recovery interviews | Dynamic facial variability, multiscale entropy | Higher facial expressivity/variability tracked lower depression severity; useful because dynamics, not only average intensity, were treated as biomarkers. |
+| Jiang et al., 2021 | 365 video interviews, 88 hours, 12 depressed patients | 7 emotions, AUs, temporal statistics | AUC `0.72` for remission classification and `0.75` for treatment response under leave-one-subject-out validation. |
+| Mahayossanunt et al., 2023 | 474 clinical interview videos; 134 depressed and 340 non-depressed | Gaze angles, AU intensity, expression features | LSTM with attention-based fusion reported accuracy `91.67%`, F1 `88.89%`, precision `91.40%`, recall `87.03%`. |
+| Kim et al., 2023 | 59 older adults | 17 AUs across posed and spontaneous emotion tasks | Higher depressive symptoms were linked to mouth-corner downward/inward pull in posed expressions and raised/narrowed inner brows in spontaneous expressions. |
+| Jin et al., 2025 | E-DAIC, 219 participants | OpenFace facial features, gaze, head pose, AUs, audio MFCC | Video-only F1 `0.853`, AUC `0.912`; multimodal fused model F1 `0.922`, AUC `0.950`, MAE `3.51`; feature contribution ranked AU > pose > audio > gaze. |
+| Schultebraucks et al., 2022 | 81 trauma survivors, one month after ED visit | Facial emotion/intensity, movement, speech prosody, language | PTSD AUC `0.90`, weighted F1 `0.83`; depression AUC `0.86`, weighted F1 `0.82`, supporting multimodal post-trauma markers. |
+| Aathreya et al., 2025 | 18 children, seven conversational PTSD contexts | AU intensities, landmarks, eye gaze, head pose | AU intensities were the best baseline feature family and context mattered; full metric table was not exposed in the inspected abstract. |
+| Fujiwara et al., 2015 | 23 preschool children exposed to the Great East Japan Earthquake | Human-rated facial expression response to comedy clip | Supports the idea that altered emotional reactivity is measurable after trauma exposure, even without automated CV features. |
+| Ren et al., 2025 | 60 GAD patients and 60 matched controls | Seven expression categories, especially neutral, anger, fear | Expression-symptom correlations ranged from about `-0.35` to `0.34`; AUC was `0.792` for anger, `0.727` for fear, and `0.723` for neutral. |
+| Zhou et al., 2023 | 319 older adults with mild cognitive impairment | Speech, facial expression, and text features | Accessible sources indicated multiclass accuracies above `85%` for depression/anxiety/apathy presentations; population-specific to MCI. |
+| AnxietyFaceTrack, 2025 preprint | 91 students, 1,173 ten-second smartphone samples | 669 OpenFace-derived landmark, gaze, pose, and AU features | Random Forest reached multiclass accuracy `0.91`, F1 `0.90`, AUC `0.98`; head rotation, jawline/face-edge, and eye landmarks were important. Not a clinical anxiety-disorder study. |
+
+### Biomarker families emphasized by the PDF
+
+| Feature family | Depression | PTSD | Anxiety / anxious states | Repo implication |
+| --- | --- | --- | --- | --- |
+| Reduced positive expressivity / smile attenuation | Strong and recurring depression signal. | Can appear, but evidence is context-sensitive. | Less central than tension, fear, vigilance, or social discomfort. | Add positive-AU and smile-amplitude composites instead of relying only on `happiness`. |
+| Brow tension / inner-brow elevation | Appears in older-adult depression and subthreshold-depression work. | Likely relevant through arousal and threat processing. | Fits GAD/threat-tension paradigms. | Track AU01/AU02/AU04 patterns and brow asymmetry over time. |
+| AU intensity patterns | One of the strongest facial feature families. | Recent child-PTSD work found AU intensities to be the best baseline feature set. | Useful, but often needs pose and eye-region cues too. | Keep py-feat AU output as the primary emotional-expressivity feature family. |
+| Temporal variability / entropy / flexibility | Clinically meaningful in depression; reduced variability often tracks higher severity. | Emerging evidence suggests dynamics may reveal PTSD maintenance mechanisms. | May show rapid context-linked tension fluctuations rather than tonic flattening. | Add windowed dynamics beyond mean/std. |
+| Head pose / head movement | Long-running depression cue; head-only models can perform reasonably well. | Included in trauma and child-PTSD datasets. | Especially salient for anxiety-like states. | Current emotional summary path is missing this high-value family. |
+| Eye gaze / blink / eye-region cues | Helpful, though often weaker than AUs plus audio in depression models. | Plausible for avoidance/vigilance patterns; still sparse. | Clinically plausible; eye-gaze-only models can be modest but eye-region features still contribute. | Join with blink-rate docs and add gaze/fixation summaries when available. |
+| Speech-linked mouth movement | Major confound in interview videos. | Crucial in trauma narratives, where arousal is expressed during recall. | Can mimic or mask anxiety-related tension. | The current speaking split is directionally right but should be upgraded with audio VAD. |
 
 Clinical caution:
 
 - depression, PTSD, and anxiety studies often report group-level patterns, not individual diagnostic certainty
 - demographic, lighting, pose, occlusion, camera quality, and task design can affect model output
 - emotion models trained on general facial-expression datasets may not transfer cleanly to clinical interviews
+- reported accuracies from private or small datasets are encouraging but not definitive
+- diagnosis, severity scales, and state self-report are different prediction targets
 
 ## AIREST guidance
 
@@ -713,6 +756,7 @@ Why:
 - dependency constraints are narrow
 - baseline behavior is not production-clean
 - face-detection failures are collapsed into dropped rows without quality metadata
+- the PDF emphasizes head pose, gaze, temporal dynamics, and multimodal fusion, which are not fully represented in the current local output
 
 Suggested production boundary:
 
@@ -728,6 +772,39 @@ Recommended artifact names if AIREST adopts this offline feature family:
 - `features/emotional_expressivity_summary.csv`
 - `features/emotional_expressivity_qc.json`
 - `features/emotional_expressivity_meta.json`
+
+### Research-driven feature roadmap
+
+The PDF recommends treating emotional expressivity as a hierarchy rather than one score:
+
+1. State: framewise emotions and AUs.
+2. Behavioral episodes: smile episodes, brow tension, gaze aversion, blink bursts.
+3. Temporal dynamics: variability, entropy, autocorrelation, onset/offset, burstiness.
+4. Context: speaking/listening state, question type, prompt valence, trauma narrative vs neutral baseline.
+
+Recommended next features:
+
+| Feature group | Concrete variables | Priority |
+| --- | --- | --- |
+| Core AUs | AU01, AU02, AU04, AU05, AU06, AU07, AU10, AU12, AU14, AU15, AU17, AU20, AU23, AU24, AU25, AU26, eye-closure AU; intensity and presence | Very high |
+| Valence/arousal proxies | Positive-AU composite, negative-AU composite, neutral proportion, anger/fear/sadness intensity | Very high |
+| Mouth and speech separation | Mouth openness, lip compression, smile amplitude, speaking probability, non-speaking expressivity | Very high |
+| Head dynamics | Mean/std/range/velocity of yaw, pitch, roll; nod and shake episode counts | High |
+| Gaze and eyes | Horizontal/vertical gaze, fixation stability, gaze aversion proportion, blink count, blink duration | High |
+| Temporal dynamics | Windowed mean/std, coefficient of variation, sample entropy, spectral entropy, autocorrelation, burstiness, transition counts | Very high |
+| Symmetry and laterality | Left-right AU asymmetry, unilateral smile/brow activity, head-turn bias | Medium |
+| Quality and confounds | Detection confidence, missingness ratio, occlusion ratio, illumination flag, speaking ratio | Very high |
+
+The PDF's proposed experimental pipeline is:
+
+1. extract framewise features at native frame rate
+2. resample to about `10` fps after extraction for efficiency
+3. build `2-10` second windows with `50%` overlap
+4. compute both raw sequences and window summaries
+5. train an interpretable baseline such as elastic net or XGBoost
+6. add a sequence model such as BiLSTM or a small transformer encoder
+7. add multimodal fusion across face, audio, and text
+8. evaluate with subject-exclusive splits, nested cross-validation, AUC, F1, balanced accuracy, sensitivity/specificity, calibration metrics, bootstrapped confidence intervals, and subgroup performance by sex, age, and site
 
 ## Technical strengths
 
@@ -824,6 +901,7 @@ Local docs:
 - `README.md`
 - `README_openwillis_upstream.md`
 - `demo_openwillis_face.ipynb`
+- `emotional_expressivity/Emotional Expressivity Biomarkers for PTSD, Depression, and Anxiety Detection.pdf`
 - `facial_expression/facial_expression.md`
 - `facial_expression/facial_expressivity_feature_inventory.md`
 - `facial_expression/airest_openwillis_feature_decision_matrix.md`
