@@ -32,6 +32,82 @@ Key interpretation:
 | Speech/text features | Not facial; useful for multimodal merge | Covered by `phonova`: structure, pause, repetition, coherence, sentiment, first-person features over transcripts | Already covered by code sample | Yes | None for face pipeline | Keep separate from face pipeline; join offline by session/task/time windows |
 | Feature export contract | OpenWillis returns Python dataframes; local docs list shapes and columns | AIREST requires `features/facial_features.csv`, QC, metadata, checksums; schema is TBD | Partially covered | N/A | Low | Define versioned schema: raw realtime face features, derived offline facial expressivity, and summary aggregates |
 
+## Recommendation
+
+Use OpenWillis facial expressivity as a **validation reference**, not as a production runtime dependency.
+
+AIREST should own the production face pipeline, schema, QC behavior, and session lifecycle. OpenWillis is useful as an external reference implementation for landmark-derived movement features and as a benchmark for comparing feature distributions, but it should not sit on the critical path for clinical session recording or realtime face QC.
+
+Use the heavier OpenWillis `emotional_expressivity` / py-feat outputs as a **research-only benchmark** until latency, dependency, baseline-normalization, and clinical-validity risks are resolved.
+
+## Decision Note
+
+| Option | Decision | Rationale |
+| --- | --- | --- |
+| Production dependency | Do not use | Too much operational risk for the MVP: heavy model stack, narrow Python/Torch compatibility, slow emotion/AU extraction, unclear failure contracts, and fragile baseline behavior. |
+| Validation reference | Use | Good fit for validating AIREST-derived landmark movement features: normalized landmarks, per-landmark displacement, region movement summaries, mouth openness, and speaking split logic. |
+| Research-only benchmark | Use for py-feat emotion/AU features | Emotion labels and AUs are analytically interesting but should not block recording, QC, export, or clinical-start readiness. |
+
+## MVP Feature Subset
+
+| Feature group | MVP decision | Production source | Notes |
+| --- | --- | --- | --- |
+| Raw session video | Include | AIREST recording controller | Required source artifact; independent of OpenWillis. |
+| Per-frame face QC | Include | AIREST realtime MediaPipe process | Persist `frame_idx`, `timestamp_sec`, `face_detected`, confidence/visibility if available, face-centered status, dropped-frame spans. |
+| Raw or compact MediaPipe landmarks | Include if storage/performance is acceptable | AIREST realtime MediaPipe process | Store enough data to reproduce derived features offline. Prefer a versioned sidecar format if CSV is too wide. |
+| Normalized landmarks | Add offline | AIREST post-processing, validated against OpenWillis | Center/scale/optional eye alignment after session completion. |
+| Landmark displacement | Add offline | AIREST post-processing, validated against OpenWillis | Compute frame-to-frame displacement; do not require realtime. |
+| Region movement summaries | Add offline MVP feature | AIREST post-processing, validated against OpenWillis | Include `overall`, `upper_face`, `lower_face`, `lips`, `eyebrows` mean/std. |
+| Mouth openness | Add offline MVP feature | AIREST post-processing | Can later become realtime if needed for speaking-state feedback. |
+| Blink rate / blink events | Add offline MVP-adjacent feature | AIREST post-processing | Useful and cheap from landmarks, but not required for session gating unless protocol demands it. |
+| Speaking vs non-speaking facial summaries | Defer to post-MVP or offline optional | AIREST post-processing + audio/VAD/transcript alignment | Valuable for analysis, but needs a stable alignment contract. |
+| Baseline-relative features | Exclude unless protocol adds neutral baseline | AIREST post-processing, OpenWillis reference only | Do not claim baseline-normalized reactivity without an explicit baseline segment. |
+| Emotion scores | Research only | Offline benchmark, not production MVP | Keep out of MVP decision features. |
+| Action units | Research only | Offline benchmark, not production MVP | Potentially useful later, but too heavy and underspecified for MVP. |
+
+## Production Feature Contract
+
+For MVP, define AIREST-owned outputs rather than adopting OpenWillis dataframe contracts directly:
+
+| Artifact | Required columns / content | Purpose |
+| --- | --- | --- |
+| `features/facial_features.csv` or equivalent sidecar | `frame_idx`, `timestamp_sec`, face QC fields, optional raw landmarks/head/gaze fields | Realtime capture and QC trace. |
+| `features/facial_expressivity_summary.csv` | `overall_mean/std`, `upper_face_mean/std`, `lower_face_mean/std`, `lips_mean/std`, `eyebrows_mean/std`, `mouth_openness_mean/std`, feature version | Offline derived MVP movement summary. |
+| `features/facial_qc.json` | face detection percentage, missing spans, camera freeze flags, frame count, FPS, processing status | Session acceptance and export readiness. |
+| `features/facial_postprocess_meta.json` | algorithm version, input artifact hashes, parameter values, runtime, success/failure details | Reproducibility and audit trail. |
+
+## Robustness Limitations
+
+| Limitation | Impact | MVP handling |
+| --- | --- | --- |
+| OpenWillis `frames_per_second` behavior is not a true sampler in local `facial_expressivity` | Output timing may not match user expectation | AIREST should define its own sampling and timestamp policy. |
+| First displacement row is `NaN`, not zero | Requires cleanup before summaries or joins | Normalize AIREST output contract explicitly. |
+| Missing baseline path silently changes behavior | High risk of mislabeled “baseline-normalized” outputs | Require explicit baseline artifact validation if baseline features are ever enabled. |
+| Baseline normalization is methodologically fragile | Relative features can be misleading, especially across raw vs normalized landmark spaces | Exclude from MVP unless fixed and validated. |
+| Face loss, occlusion, pose changes, lighting, and multi-face cases can produce missing or unstable landmarks | May bias movement summaries | Keep QC thresholds, missing-span reporting, and manual-review flags. |
+| OpenWillis output schema is dataframe-oriented, not an AIREST product contract | Weak backward compatibility for clinical exports | Version AIREST schema independently. |
+| Python/runtime constraints are narrow | Operational fragility on clinic laptops | Avoid production dependency; run reference validation in controlled analysis environment. |
+
+## Latency Limitations
+
+| Pipeline | Observed / expected behavior | Decision |
+| --- | --- | --- |
+| OpenWillis `facial_expressivity` landmark movement | More plausible for offline batch, but still reads/processes full video frame-by-frame | Use as validation reference; AIREST can implement equivalent post-processing. |
+| OpenWillis `emotional_expressivity` / py-feat | Local notebook run showed full-frame emotion extraction taking roughly minutes for a short clip; model stack loads RetinaFace, landmarks, AUs, emotions, pose, identity | Research-only/offline; never block realtime recording or QC. |
+| Realtime AIREST face QC | Must stay lightweight and deterministic enough for warnings and session gating | Limit realtime work to camera health, face presence, face-centered status, and optional landmark persistence. |
+
+## Implementation Direction
+
+1. Keep AIREST realtime face pipeline minimal and robust: record video, monitor face presence, write QC traces, and never fail a session because optional derived features lag.
+2. Add an AIREST-owned offline post-processing step for the MVP movement subset: normalized landmarks, displacement, region summaries, and mouth openness.
+3. Use OpenWillis on a validation set to compare summary distributions, missingness, and selected frame-level traces against AIREST outputs.
+4. Keep OpenWillis py-feat emotion and AU extraction as a research benchmark until it has stable runtime packaging, acceptable latency, explicit clinical interpretation rules, and validated normalization.
+5. Do not expose facial expressivity as a diagnostic or risk-score feature in MVP. Treat all outputs as captured/derived behavioral signals for later analysis.
+
+## Final Decision
+
+OpenWillis should be used as a **validation reference for MVP landmark-movement features** and as a **research-only benchmark for emotion/AU features**. It should **not** be used as a production dependency in the realtime AIREST face pipeline.
+
 ## Suggested Feature Layers
 
 | Layer | Include | Blocking realtime? | Rationale |
