@@ -155,6 +155,17 @@ Notes:
 - The mediapipe timings above treat `8s` as the one-time bbox preprocessing cost, then add it to the head-movement runtime for the combined column.
 - The runtime is not perfectly monotonic because model warm-up, detector behavior, and full-frame versus cropped-frame inference all affect wall-clock time.
 
+### Detector Backend Note
+
+`preprocess_face_video()` defaults to `detector_backend="mtcnn"` in code, but for this workspace `mediapipe` is the better practical choice for bbox preprocessing.
+
+| Backend | Practical quality in local use | Runtime | Notes |
+| --- | --- | --- | --- |
+| `mediapipe` | Generally cleaner and more stable bbox tracks | Faster | Preferred when the goal is to generate `bbox_list` for head movement. |
+| `mtcnn` (default) | Less accurate/stable in local validation | Slower | More likely to produce artifacts such as jittery boxes, box jumps, and occasional false crops. |
+
+When bbox quality is poor, downstream head-movement features such as `xy_disp` and `euclidean_angle_disp` become noisier.
+
 ## Optional BBox Source
 
 `bbox_list=[]` means `head_movement()` detects face pose on the full frame. In that case, `padding_percent` has no effect.
