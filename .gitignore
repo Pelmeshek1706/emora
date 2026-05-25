@@ -2,3 +2,5 @@
 **/__pycache__/**
 tmp/
 .env
+.cache
+output/jupyter-notebook/rafdb_mediapipe_768_publish
