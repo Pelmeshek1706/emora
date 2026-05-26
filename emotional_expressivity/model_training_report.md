@@ -34,7 +34,7 @@ Recommendation: use `gformer_m_ce_sqrtw_geom_seed42` as the main RAF-DB landmark
 
 ### 3.1 Training Dataset
 
-Dataset used: `Pelmeshek/raf-db-7emotions-mediapipe-768`.
+Dataset used: [`Pelmeshek/raf-db-7emotions-mediapipe-768`](https://huggingface.co/datasets/Pelmeshek/raf-db-7emotions-mediapipe-768).
 
 This is a RAF-DB-derived dataset with 7 emotion labels:
 

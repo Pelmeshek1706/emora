@@ -88,7 +88,7 @@ This branch does not replace the full py-feat stack yet:
 
 ### Dataset used
 
-Dataset: `Pelmeshek/raf-db-7emotions-mediapipe-768`.
+Dataset: [`Pelmeshek/raf-db-7emotions-mediapipe-768`](https://huggingface.co/datasets/Pelmeshek/raf-db-7emotions-mediapipe-768).
 
 This is a RAF-DB-derived landmark cache with these target labels:
 
