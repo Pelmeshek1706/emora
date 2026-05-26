@@ -412,9 +412,41 @@ But it loses on:
 
 That is why overall macro-F1 is almost the same. The medium version (`gformer_m`) produces a real improvement because it has enough width and depth to use graph-aware inductive bias more effectively.
 
-## 10. Training Quality Assessment
+## 10. Model Footprint And Latency
 
-### 10.1 What Is Good
+This section summarizes the local CPU benchmark added to `output/jupyter-notebook/mediapipe_pyfeat_test.ipynb`.
+
+Benchmark artifact:
+
+`output/jupyter-notebook/mediapipe_pyfeat_test/results/model_footprint_latency.csv`
+
+| model | pipeline | params | disk footprint MB | param/buffer memory MB | RSS load delta MB | median latency ms/sample | mean latency ms/sample | repeats |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `gformer_s` | precomputed landmarks -> logits | 1,489,978 | 10.955 | 10.928 | 31.109 | 20.983 | 21.149 | 50 |
+| `gformer_m` | precomputed landmarks -> logits | 2,900,030 | 16.337 | 16.307 | 0.078 | 37.128 | 37.426 | 50 |
+| `py-feat_default_stack` | raw image -> face/landmark/emotion stack | n/a | 946.464 | 800.026 | 1311.060 | 128.901 | 128.953 | 5 |
+
+Important interpretation details:
+
+- Graphormer latency measures only `precomputed landmarks -> logits`. It assumes MediaPipe landmarks are already available.
+- `py-feat` latency measures `raw image -> face detection -> landmark detection -> emotion inference`.
+- Therefore, the latency numbers are deployment-pipeline measurements, not a pure neural-network-only comparison.
+- `disk footprint MB` for Graphormer is the checkpoint size. For `py-feat`, it is the approximate local default resource footprint for the installed detector stack.
+- `param/buffer memory MB` is exact for PyTorch tensors where available. For `py-feat`, it captures the visible PyTorch tensor footprint but does not fully include Python object overhead, XGBoost internals, sklearn objects, or transient image-processing allocations.
+- `RSS load delta MB` is process-dependent. If a model was already cached in the notebook process, the delta can be near zero; restart the kernel for a clean load measurement.
+
+Practical consequence:
+
+| Decision point | Implication |
+| --- | --- |
+| Smallest deployable model | `gformer_s` has the smallest checkpoint and lowest landmark-to-logit latency. |
+| Best current quality/size tradeoff | `gformer_m` is still small enough for local deployment while giving the best RAF-DB metrics. |
+| Heaviest stack | `py-feat` is much larger on disk and in memory because it loads a full image-processing detector stack, not only an emotion classifier. |
+| Fair deployment comparison | If the production pipeline already computes MediaPipe landmarks for other biomarkers, Graphormer-lite is much cheaper at the emotion-classification step. If raw images are the only input and landmarks are not precomputed, MediaPipe extraction cost must be included separately. |
+
+## 11. Training Quality Assessment
+
+### 11.1 What Is Good
 
 - All Graphormer runs save `config.json`, `history.csv`, `history.jsonl`, `summary.json`, `best_model.pt`, predictions, and confusion matrices.
 - Validation macro-F1 is used for checkpoint selection.
@@ -423,7 +455,7 @@ That is why overall macro-F1 is almost the same. The medium version (`gformer_m`
 - A separate py-feat comparison notebook and single-image inference API exist.
 - Reproducible artifacts exist for train/val/test split and coverage.
 
-### 10.2 What Remains Weak
+### 11.2 What Remains Weak
 
 | Problem | Why it matters |
 | --- | --- |
@@ -434,7 +466,7 @@ That is why overall macro-F1 is almost the same. The medium version (`gformer_m`
 | MediaPipe failures are class-dependent | Landmark extraction failure changes the class priors in the trainable subset. |
 | Calibration has not been evaluated separately | For downstream biomarkers, stable probabilities matter, not only top-1 accuracy. |
 
-## 11. Recommended Next Steps
+## 12. Recommended Next Steps
 
 1. Freeze `gformer_m_ce_sqrtw_geom_seed42` as the current best RAF-DB landmark checkpoint.
 2. Keep `flattened_mlp` as a mandatory baseline in future reports.
@@ -452,7 +484,7 @@ That is why overall macro-F1 is almost the same. The medium version (`gformer_m`
    - add head pose, gaze, blink, and AU dynamics;
    - evaluate subject-exclusive splits.
 
-## 12. Final Conclusion
+## 13. Final Conclusion
 
 `gformer_m_ce_sqrtw_geom_seed42` is the best current model for RAF-DB landmark emotion recognition in this project. It outperforms `gformer_s`, the legacy `flattened_mlp`, and is more aligned with RAF-DB labels than `py-feat` on the current comparison artifact.
 
