@@ -4,3 +4,7 @@ tmp/
 .env
 .cache
 output/jupyter-notebook/rafdb_mediapipe_768_publish
+output/jupyter-notebook/mediapipe_pyfeat_test
+output/jupyter-notebook/rafdb_graphormer_lite_full_run_exp
+output/jupyter-notebook/rafdb_precomputed_landmark_graph_run
+reports
