@@ -21,14 +21,14 @@ Recommendation: use `gformer_m_ce_sqrtw_geom_seed42` as the main RAF-DB landmark
 
 | Artifact | Path |
 | --- | --- |
-| Graphormer-lite training notebook | `output/jupyter-notebook/rafdb_graphormer_lite_full_colab_uv_mediapipe_legacy_exp.ipynb` |
-| Graphormer-lite run outputs | `output/jupyter-notebook/rafdb_graphormer_lite_full_run_exp/` |
-| Best medium model summary | `output/jupyter-notebook/rafdb_graphormer_lite_full_run_exp/experiments/20260525_140301_gformer_m_ce_sqrtw_geom_seed42/summary.json` |
-| Best small model summary | `output/jupyter-notebook/rafdb_graphormer_lite_full_run_exp/experiments/20260525_131238_gformer_s_ce_sqrtw_geom_seed42/summary.json` |
-| Legacy baseline results | `output/jupyter-notebook/rafdb_precomputed_landmark_graph_run/results/comparison.csv` |
-| py-feat comparison notebook | `output/jupyter-notebook/mediapipe_pyfeat_test.ipynb` |
-| py-feat comparison results | `output/jupyter-notebook/mediapipe_pyfeat_test/results/` |
-| RAF-DB MediaPipe cache | `output/jupyter-notebook/rafdb_mediapipe_768_publish/cache/processed_rows_full.jsonl` |
+| Graphormer-lite training notebook | `output/jupyter-notebook/emotional_expressivity/rafdb_graphormer_lite_full_colab_uv_mediapipe_legacy_exp.ipynb` |
+| Graphormer-lite run outputs | `output/jupyter-notebook/emotional_expressivity/rafdb_graphormer_lite_full_run_exp/` |
+| Best medium model summary | `output/jupyter-notebook/emotional_expressivity/rafdb_graphormer_lite_full_run_exp/experiments/20260525_140301_gformer_m_ce_sqrtw_geom_seed42/summary.json` |
+| Best small model summary | `output/jupyter-notebook/emotional_expressivity/rafdb_graphormer_lite_full_run_exp/experiments/20260525_131238_gformer_s_ce_sqrtw_geom_seed42/summary.json` |
+| Legacy baseline results | `output/jupyter-notebook/emotional_expressivity/rafdb_precomputed_landmark_graph_run/results/comparison.csv` |
+| py-feat comparison notebook | `output/jupyter-notebook/emotional_expressivity/mediapipe_pyfeat_test.ipynb` |
+| py-feat comparison results | `output/jupyter-notebook/emotional_expressivity/mediapipe_pyfeat_test/results/` |
+| RAF-DB MediaPipe cache | `output/jupyter-notebook/emotional_expressivity/rafdb_mediapipe_768_publish/cache/processed_rows_full.jsonl` |
 
 ## 3. Dataset
 
@@ -81,7 +81,7 @@ Coverage:
 
 All failures in the current cache have the reason `no_face_detected`.
 
-![RAF-DB trainable distribution](../output/jupyter-notebook/model_training_report_assets/rafdb_trainable_distribution.png)
+![RAF-DB trainable distribution](../output/jupyter-notebook/emotional_expressivity/model_training_report_assets/rafdb_trainable_distribution.png)
 
 ### 3.4 Important Consequence Of Filtering
 
@@ -101,7 +101,7 @@ MediaPipe failures in this dataset are not caused by a custom high threshold. Th
 
 Preprocessing notebook:
 
-`output/jupyter-notebook/rafdb-hf-mediapipe-768-publish.ipynb`
+`output/jupyter-notebook/emotional_expressivity/rafdb-hf-mediapipe-768-publish.ipynb`
 
 Relevant configuration:
 
@@ -148,7 +148,7 @@ Failure rate by class:
 
 Example failed MediaPipe samples:
 
-![Failed MediaPipe RAF-DB samples](../output/jupyter-notebook/assets/failed_mediapipe_contact_sheet.jpg)
+![Failed MediaPipe RAF-DB samples](../output/jupyter-notebook/emotional_expressivity/rafdb_mediapipe_768_publish/failed_mediapipe_contact_sheet.jpg)
 
 Observed failure patterns:
 
@@ -317,7 +317,7 @@ Difference from `gformer_s`: larger hidden width, more layers, more heads, wider
 
 ### 6.4 Visual Architecture Comparison
 
-![FlattenedMLP vs Graphormer-lite S architecture](../output/jupyter-notebook/architecture_comparison/flattened_mlp_vs_gformer_s_architecture.png)
+![FlattenedMLP vs Graphormer-lite S architecture](../output/jupyter-notebook/emotional_expressivity/architecture_comparison/flattened_mlp_vs_gformer_s_architecture.png)
 
 ## 7. Model Results On RAF-DB Test
 
@@ -369,7 +369,7 @@ result_pyfeat = inferance_pyfeat(image_for_test)
 For `gformer_m`, the input is normalized MediaPipe landmarks.  
 For `py-feat`, the input is the raw image path or array, after which `py-feat` performs face detection, landmark detection, and emotion inference internally.
 
-The current comparison artifacts in `output/jupyter-notebook/mediapipe_pyfeat_test/results/` contain `315` samples, meaning `45` per class.
+The current comparison artifacts in `output/jupyter-notebook/emotional_expressivity/mediapipe_pyfeat_test/results/` contain `315` samples, meaning `45` per class.
 
 ### 8.2 Top-label Agreement With Dataset Label
 
@@ -397,7 +397,7 @@ Interpretation:
 | surprise | 45 | 0.5111 | 0.7778 |
 | neutral | 45 | 0.4444 | 0.9778 |
 
-![py-feat vs gformer_m class match](../output/jupyter-notebook/model_training_report_assets/pyfeat_vs_gformer_m_class_match.png)
+![py-feat vs gformer_m class match](../output/jupyter-notebook/emotional_expressivity/model_training_report_assets/pyfeat_vs_gformer_m_class_match.png)
 
 Key observations:
 
@@ -448,7 +448,7 @@ This indicates not only different top-label decisions, but also different calibr
 | surprise | 0.6884 | 0.6557 | -0.0328 |
 | neutral | 0.9846 | 0.9648 | -0.0197 |
 
-![FlattenedMLP vs Graphormer-lite S per-class F1](../output/jupyter-notebook/assets/failed_mediapipe_contact_sheet.jpg)
+![FlattenedMLP vs Graphormer-lite S per-class F1](../output/jupyter-notebook/emotional_expressivity/architecture_comparison/flattened_mlp_vs_gformer_s_per_class_f1.png)
 
 ### 9.3 Why A Simple MLP Is Almost As Strong
 
@@ -484,11 +484,11 @@ That is why overall macro-F1 is almost the same. The medium version (`gformer_m`
 
 ## 10. Model Footprint And Latency
 
-This section summarizes the local CPU benchmark added to `output/jupyter-notebook/mediapipe_pyfeat_test.ipynb`.
+This section summarizes the local CPU benchmark added to `output/jupyter-notebook/emotional_expressivity/mediapipe_pyfeat_test.ipynb`.
 
 Benchmark artifact:
 
-`output/jupyter-notebook/mediapipe_pyfeat_test/results/model_footprint_latency.csv`
+`output/jupyter-notebook/emotional_expressivity/mediapipe_pyfeat_test/results/model_footprint_latency.csv`
 
 | model | pipeline | params | disk footprint MB | param/buffer memory MB | RSS load delta MB | median latency ms/sample | mean latency ms/sample | repeats |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
