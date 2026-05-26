@@ -95,6 +95,76 @@ Example:
 
 In other words, `neutral` is almost never lost, while non-neutral classes lose a noticeable share of samples. This increases imbalance in the trainable subset and explains why class weights and macro-F1 are required as core training and selection tools.
 
+### 3.5 MediaPipe Thresholds And Failure Analysis
+
+MediaPipe failures in this dataset are not caused by a custom high threshold. The preprocessing notebook used MediaPipe Tasks `FaceLandmarker` with default confidence thresholds.
+
+Preprocessing notebook:
+
+`output/jupyter-notebook/rafdb-hf-mediapipe-768-publish.ipynb`
+
+Relevant configuration:
+
+```python
+options = FaceLandmarkerOptions(
+    base_options=BaseOptions(model_asset_path=str(model_path)),
+    running_mode=VisionRunningMode.IMAGE,
+    num_faces=1,
+    output_face_blendshapes=False,
+    output_facial_transformation_matrixes=True,
+)
+```
+
+Because the confidence thresholds were not explicitly set, MediaPipe used its defaults:
+
+| MediaPipe option | value |
+| --- | ---: |
+| `min_face_detection_confidence` | 0.5 |
+| `min_face_presence_confidence` | 0.5 |
+| `min_tracking_confidence` | 0.5 |
+| `num_faces` | 1 |
+
+The failure condition was:
+
+```python
+result = landmarker.detect(mp_image)
+if not result.face_landmarks:
+    raise RuntimeError("no_face_detected")
+```
+
+So a row was marked as failed only when MediaPipe returned no face landmarks at all. This is separate from the `py-feat` comparison notebook, where `py-feat` face detection used `threshold=0.95` with a fallback to `0.5`. That `py-feat` threshold was not used when generating the RAF-DB MediaPipe cache.
+
+Failure rate by class:
+
+| class | initial | failed | failure rate | success | success rate |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| anger | 4071 | 770 | 18.91% | 3301 | 81.09% |
+| disgust | 877 | 121 | 13.80% | 756 | 86.20% |
+| fear | 355 | 66 | 18.59% | 289 | 81.41% |
+| happiness | 5957 | 879 | 14.76% | 5078 | 85.24% |
+| sadness | 2460 | 386 | 15.69% | 2074 | 84.31% |
+| surprise | 1619 | 170 | 10.50% | 1449 | 89.50% |
+| neutral | 5132 | 1 | 0.02% | 5131 | 99.98% |
+
+Example failed MediaPipe samples:
+
+![Failed MediaPipe RAF-DB samples](../output/jupyter-notebook/rafdb_mediapipe_768_publish/failed_mediapipe_contact_sheet.jpg)
+
+Observed failure patterns:
+
+- strong profile view;
+- partially cropped faces;
+- hands, hair, glasses, or objects occluding facial landmarks;
+- extreme facial expressions;
+- low resolution or strong blur;
+- grayscale or low-contrast images;
+- dark lighting;
+- faces close to the crop boundary.
+
+The most important bias is that `neutral` almost always passes MediaPipe, while non-neutral classes contain more wild or difficult images. This is why `neutral` increases from `25.07%` before filtering to `28.38%` after filtering.
+
+Possible follow-up experiment: rerun MediaPipe extraction with lower thresholds such as `min_face_detection_confidence=0.3` and `min_face_presence_confidence=0.3`, then compare both landmark coverage and downstream model quality against the current `0.5` default. This may recover more samples, but it can also introduce noisy landmarks.
+
 ## 4. Why RAF-DB Instead Of The py-feat Dataset
 
 ### 4.1 What py-feat Uses
@@ -378,7 +448,7 @@ This indicates not only different top-label decisions, but also different calibr
 | surprise | 0.6884 | 0.6557 | -0.0328 |
 | neutral | 0.9846 | 0.9648 | -0.0197 |
 
-![FlattenedMLP vs Graphormer-lite S per-class F1](../output/jupyter-notebook/architecture_comparison/flattened_mlp_vs_gformer_s_per_class_f1.png)
+![FlattenedMLP vs Graphormer-lite S per-class F1](../output/jupyter-notebook/assets/failed_mediapipe_contact_sheet.jpg)
 
 ### 9.3 Why A Simple MLP Is Almost As Strong
 
