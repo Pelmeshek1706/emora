@@ -148,7 +148,7 @@ Failure rate by class:
 
 Example failed MediaPipe samples:
 
-![Failed MediaPipe RAF-DB samples](../output/jupyter-notebook/rafdb_mediapipe_768_publish/failed_mediapipe_contact_sheet.jpg)
+![Failed MediaPipe RAF-DB samples](../output/jupyter-notebook/assets/failed_mediapipe_contact_sheet.jpg)
 
 Observed failure patterns:
 
