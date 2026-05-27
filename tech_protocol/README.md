@@ -19,6 +19,12 @@ Markdown. No JSON objects are used in this file.
 | Source size observed locally | About 52 KB |
 | Scope | Interview data capture for PTSD, depression, and anxiety detection |
 
+## Related Mapping Notes
+
+| Note | Purpose |
+| --- | --- |
+| [OpenWillis Landmark Output Schema Note](openwillis_landmark_schema_note.md) | Maps the 468-landmark OpenWillis / MediaPipe Face Mesh output, displacement derivation, region summaries, and numbered landmark visualizations. |
+
 ## Executive Summary
 
 AIREST data capture should be treated as a standardized clinical measurement
