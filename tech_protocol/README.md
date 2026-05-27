@@ -24,6 +24,7 @@ Markdown. No JSON objects are used in this file.
 | Note | Purpose |
 | --- | --- |
 | [OpenWillis Landmark Output Schema Note](openwillis_landmark_schema_note.md) | Maps the 468-landmark OpenWillis / MediaPipe Face Mesh output, displacement derivation, region summaries, and numbered landmark visualizations. |
+| [AIREST Gaze and OpenWillis Landmark Compatibility Note](airest_gaze_openwillis_landmark_compatibility.md) | Compares the current AIREST gaze pipeline with OpenWillis landmark indexing, coordinate transforms, and displacement requirements. |
 
 ## Executive Summary
 

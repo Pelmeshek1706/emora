@@ -24,6 +24,7 @@ from matplotlib.lines import Line2D
 
 
 NUM_LANDMARKS = 468
+NUM_REFINED_LANDMARKS = 478
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = REPO_ROOT / "openwillis-face/src/openwillis/face/config/facial.json"
 VIDEO_PATH = REPO_ROOT / "sample_data/expressive.mp4"
@@ -36,6 +37,8 @@ COLORS = {
     "lips": "#d93025",
     "eyebrows": "#f9ab00",
     "other": "#b8b8b8",
+    "base_468": "#2f66d0",
+    "refined_iris_10": "#d93025",
 }
 
 
@@ -61,7 +64,7 @@ def load_regions() -> dict[str, list[int]]:
     }
 
 
-def extract_landmarks() -> tuple[int, np.ndarray, np.ndarray]:
+def extract_landmarks(refine_landmarks: bool = False) -> tuple[int, np.ndarray, np.ndarray]:
     cap = cv2.VideoCapture(str(VIDEO_PATH))
     if not cap.isOpened():
         raise RuntimeError(f"Could not open {VIDEO_PATH}")
@@ -70,7 +73,7 @@ def extract_landmarks() -> tuple[int, np.ndarray, np.ndarray]:
     with face_mesh_solution.FaceMesh(
         static_image_mode=True,
         max_num_faces=1,
-        refine_landmarks=False,
+        refine_landmarks=refine_landmarks,
         min_detection_confidence=0.5,
     ) as face_mesh:
         frame_idx = 0
@@ -82,7 +85,8 @@ def extract_landmarks() -> tuple[int, np.ndarray, np.ndarray]:
             rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
             result = face_mesh.process(rgb)
             if result.multi_face_landmarks:
-                landmarks = result.multi_face_landmarks[0].landmark[:NUM_LANDMARKS]
+                max_landmarks = NUM_REFINED_LANDMARKS if refine_landmarks else NUM_LANDMARKS
+                landmarks = result.multi_face_landmarks[0].landmark[:max_landmarks]
                 height, width = rgb.shape[:2]
                 coords = np.array(
                     [[point.x * width, point.y * height, point.z] for point in landmarks],
@@ -95,6 +99,48 @@ def extract_landmarks() -> tuple[int, np.ndarray, np.ndarray]:
 
     cap.release()
     raise RuntimeError(f"No face landmarks detected in {VIDEO_PATH}")
+
+
+def extract_matching_refined_landmarks(target_frame_idx: int) -> tuple[np.ndarray, np.ndarray]:
+    cap = cv2.VideoCapture(str(VIDEO_PATH))
+    if not cap.isOpened():
+        raise RuntimeError(f"Could not open {VIDEO_PATH}")
+
+    face_mesh_solution = mp.solutions.face_mesh
+    with face_mesh_solution.FaceMesh(
+        static_image_mode=True,
+        max_num_faces=1,
+        refine_landmarks=True,
+        min_detection_confidence=0.5,
+    ) as face_mesh:
+        frame_idx = 0
+        while True:
+            ok, bgr = cap.read()
+            if not ok:
+                break
+
+            if frame_idx != target_frame_idx:
+                frame_idx += 1
+                continue
+
+            rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+            result = face_mesh.process(rgb)
+            if not result.multi_face_landmarks:
+                break
+
+            landmarks = result.multi_face_landmarks[0].landmark[:NUM_REFINED_LANDMARKS]
+            height, width = rgb.shape[:2]
+            coords = np.array(
+                [[point.x * width, point.y * height, point.z] for point in landmarks],
+                dtype=float,
+            )
+            cap.release()
+            return rgb, coords
+
+            frame_idx += 1
+
+    cap.release()
+    raise RuntimeError(f"No refined face landmarks detected on frame {target_frame_idx} in {VIDEO_PATH}")
 
 
 def face_axis_limits(coords: np.ndarray) -> tuple[float, float, float, float]:
@@ -233,6 +279,64 @@ def save_plot(
     plt.close(fig)
 
 
+def save_468_vs_478_plot(image: np.ndarray, refined_coords: np.ndarray, frame_idx: int) -> None:
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    base_indices = list(range(NUM_LANDMARKS))
+    iris_indices = list(range(NUM_LANDMARKS, NUM_REFINED_LANDMARKS))
+    x_min, x_max, y_min, y_max = face_axis_limits(refined_coords[:NUM_LANDMARKS])
+
+    fig, ax = plt.subplots(figsize=(10.5, 12), dpi=220)
+    ax.imshow(image)
+    ax.set_xlim(x_min, x_max)
+    ax.set_ylim(y_max, y_min)
+    ax.set_axis_off()
+
+    base_xy = refined_coords[base_indices, :2]
+    iris_xy = refined_coords[iris_indices, :2]
+
+    ax.scatter(
+        base_xy[:, 0],
+        base_xy[:, 1],
+        s=18,
+        c=COLORS["base_468"],
+        edgecolors="white",
+        linewidths=0.35,
+        alpha=0.92,
+        label="Shared base landmarks 0-467 / lmk001-lmk468",
+    )
+    ax.scatter(
+        iris_xy[:, 0],
+        iris_xy[:, 1],
+        s=80,
+        c=COLORS["refined_iris_10"],
+        edgecolors="white",
+        linewidths=0.8,
+        alpha=1.0,
+        label="Extra refined iris landmarks 468-477",
+        zorder=5,
+    )
+
+    draw_labels(ax, refined_coords, base_indices, COLORS["base_468"], size=3.0)
+    draw_labels(ax, refined_coords, iris_indices, COLORS["refined_iris_10"], size=7.5)
+
+    legend_handles = [
+        Line2D([0], [0], marker="o", color="w", markerfacecolor=COLORS["base_468"], label="468 shared face landmarks", markersize=7),
+        Line2D([0], [0], marker="o", color="w", markerfacecolor=COLORS["refined_iris_10"], label="10 extra refined iris landmarks", markersize=9),
+    ]
+    ax.legend(handles=legend_handles, loc="lower center", fontsize=8, framealpha=0.86)
+    ax.set_title(
+        f"MediaPipe 478 refined landmarks versus OpenWillis 468 base landmarks\n"
+        f"Blue: shared base landmarks. Red: extra iris landmarks 468-477. Source frame {frame_idx}",
+        fontsize=12,
+        pad=12,
+    )
+    fig.tight_layout(pad=0.5)
+    fig.savefig(OUTPUT_DIR / "mediapipe_478_vs_openwillis_468_numbered.svg")
+    fig.savefig(OUTPUT_DIR / "mediapipe_478_vs_openwillis_468_numbered.png")
+    plt.close(fig)
+
+
 def write_region_membership(regions: dict[str, list[int]]) -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     lower = set(regions["lower_face"])
@@ -279,6 +383,7 @@ def write_region_membership(regions: dict[str, list[int]]) -> None:
 
 def main() -> None:
     frame_idx, image, coords = extract_landmarks()
+    refined_image, refined_coords = extract_matching_refined_landmarks(frame_idx)
     regions = load_regions()
     write_region_membership(regions)
 
@@ -312,6 +417,8 @@ def main() -> None:
             COLORS[name],
             frame_idx,
         )
+
+    save_468_vs_478_plot(refined_image, refined_coords, frame_idx)
 
     print(f"Wrote landmark visualizations to {OUTPUT_DIR}")
 
