@@ -10,3 +10,4 @@ output/jupyter-notebook/emotional_expressivity/mediapipe_pyfeat_test
 output/jupyter-notebook/emotional_expressivity/rafdb_graphormer_lite_full_run_exp
 output/jupyter-notebook/emotional_expressivity/rafdb_precomputed_landmark_graph_run
 reports
+head_pose_eval/notebooks/head_pose_eval
