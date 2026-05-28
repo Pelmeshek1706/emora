@@ -155,6 +155,36 @@ Notes:
 - The mediapipe timings above treat `8s` as the one-time bbox preprocessing cost, then add it to the head-movement runtime for the combined column.
 - The runtime is not perfectly monotonic because model warm-up, detector behavior, and full-frame versus cropped-frame inference all affect wall-clock time.
 
+### Runtime Profiling Hook
+
+`head_movement()` now has opt-in timing logs for the entry point and its helpers:
+
+```python
+head_movement_df, summary_df = owf.head_movement(
+    video_path="sample_data/baseline.mp4",
+    frames_per_second=30,
+    normalize_by_bb_size=False,
+    bbox_list=[],
+    log_runtime=True,
+    profile_log_every_n_frames=20,
+)
+```
+
+Local diagnostic run on `sample_data/baseline.mp4` (`104` frames, `1080p`, `30 fps`, no bbox):
+
+| Step | Total time | Calls | Avg per call | Share of total |
+| --- | ---: | ---: | ---: | ---: |
+| `head_movement()` | `63.011s` | `1` | `63.011s` | `100.0%` |
+| `extract_landmarks_and_bboxes()` | `62.979s` | `1` | `62.979s` | `99.9%` |
+| `sampled_frame_processing` | `60.404s` | `104` | `580.808ms` | `95.9%` |
+| `detect_facepose` | `60.403s` | `104` | `580.794ms` | `95.9%` |
+| `detector_init` | `2.307s` | `1` | `2.307s` | `3.7%` |
+| `video_frame_read` | `0.252s` | `105` | `2.399ms` | `0.4%` |
+| `compute_rotation_angles_vectorized` | `0.001s` | `1` | `1.479ms` | `0.0%` |
+| `compute_xy_disp` | `0.001s` | `1` | `1.335ms` | `0.0%` |
+
+Interpretation: for `frames_per_second=30` with `bbox_list=[]`, the bottleneck is py-feat `Detector.detect_facepose()` on full `1920x1080` frames. Video decoding and pandas/NumPy post-processing are negligible in comparison.
+
 ### Detector Backend Note
 
 `preprocess_face_video()` defaults to `detector_backend="mtcnn"` in code, but for this workspace `mediapipe` is the better practical choice for bbox preprocessing.
