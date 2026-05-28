@@ -11,3 +11,4 @@ output/jupyter-notebook/emotional_expressivity/rafdb_graphormer_lite_full_run_ex
 output/jupyter-notebook/emotional_expressivity/rafdb_precomputed_landmark_graph_run
 reports
 head_pose_eval/notebooks/head_pose_eval
+head_movement/models/face_landmarker.task
