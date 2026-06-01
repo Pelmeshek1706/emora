@@ -1,3 +1,12 @@
 **/.venv/
+__pycache__/
 **/__pycache__/**
+*.pyc
 tmp/
+.env
+.cache
+output/jupyter-notebook/emotional_expressivity/rafdb_mediapipe_768_publish
+output/jupyter-notebook/emotional_expressivity/mediapipe_pyfeat_test
+output/jupyter-notebook/emotional_expressivity/rafdb_graphormer_lite_full_run_exp
+output/jupyter-notebook/emotional_expressivity/rafdb_precomputed_landmark_graph_run
+reports

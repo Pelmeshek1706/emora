@@ -17,6 +17,9 @@ Companion notes in this folder:
 
 - `emotional_expressivity_feature_inventory.md`
 - `airest_openwillis_emotional_expressivity_decision_matrix.md`
+- `rafdb_landmark_graph_transformer_task.md`
+- `model_training_report.md`
+- `model_report_review.md`
 
 This note follows the style and depth of the `facial_expression/` documentation. It combines:
 
@@ -59,6 +62,166 @@ It should not be interpreted as:
 - a realtime session-gating signal
 
 The labels are model outputs from video frames. They can be useful as research features, exploratory summaries, and offline benchmarks, but they need careful interpretation.
+
+## Current RAF-DB landmark model update
+
+The production `emotional_expressivity` implementation is still the OpenWillis/py-feat framewise pipeline described below. The new notebook work adds a separate landmark-only research branch for the same 7 basic emotion labels.
+
+Main artifact location after the folder move:
+
+- `output/jupyter-notebook/emotional_expressivity/`
+
+Primary local report:
+
+- `emotional_expressivity/model_training_report.md`
+
+### What changed
+
+The new experiments evaluate whether a lightweight model that consumes only MediaPipe facial landmarks can complement or eventually replace the py-feat emotion head for the 7-category emotion task.
+
+This branch does not replace the full py-feat stack yet:
+
+- py-feat still provides the current OpenWillis emotion, AU, and mouth-openness outputs.
+- Graphormer-lite currently predicts only 7 emotion probabilities.
+- Graphormer-lite does not produce py-feat AUs, head pose, gaze, or speaking split features.
+- The current results are RAF-DB static-image results, not clinical-video results.
+
+### Dataset used
+
+Dataset: [`Pelmeshek/raf-db-7emotions-mediapipe-768`](https://huggingface.co/datasets/Pelmeshek/raf-db-7emotions-mediapipe-768).
+
+This is a RAF-DB-derived landmark cache with these target labels:
+
+`anger`, `disgust`, `fear`, `happiness`, `sadness`, `surprise`, `neutral`.
+
+The model was trained on MediaPipe landmark rows, not raw pixels:
+
+- `478` MediaPipe landmarks per face.
+- `(x, y, z)` per landmark.
+- stable eye-normalized coordinate system.
+- additional engineered geometry features.
+
+Dataset size before and after MediaPipe filtering:
+
+| stage | anger | disgust | fear | happiness | sadness | surprise | neutral | total |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| initial RAF-DB cache | 4071 | 877 | 355 | 5957 | 2460 | 1619 | 5132 | 20471 |
+| after MediaPipe success filter | 3301 | 756 | 289 | 5078 | 2074 | 1449 | 5131 | 18078 |
+
+Coverage after filtering is `88.31%`. All failures in the current cache are `no_face_detected`.
+
+MediaPipe preprocessing used default Face Landmarker confidence thresholds, not a custom high threshold:
+
+| option | value |
+| --- | ---: |
+| `min_face_detection_confidence` | 0.5 |
+| `min_face_presence_confidence` | 0.5 |
+| `min_tracking_confidence` | 0.5 |
+| `num_faces` | 1 |
+
+Important bias: filtering is class-dependent. `neutral` almost always survives, while `anger`, `fear`, `happiness`, and `sadness` lose materially more samples. This changes class priors and makes macro-F1, balanced accuracy, and per-class metrics more important than accuracy alone.
+
+Dataset artifacts:
+
+- `output/jupyter-notebook/emotional_expressivity/rafdb_mediapipe_768_publish/cache/processed_rows_full.jsonl`
+- `output/jupyter-notebook/emotional_expressivity/model_training_report_assets/rafdb_trainable_distribution.png`
+- `output/jupyter-notebook/emotional_expressivity/rafdb_mediapipe_768_publish/failed_mediapipe_contact_sheet.jpg`
+
+### Best current landmark model
+
+Best current model: `gformer_m_ce_sqrtw_geom_seed42`.
+
+Held-out RAF-DB test result:
+
+| model | params | best epoch | test accuracy | test macro-F1 | test weighted-F1 | test balanced accuracy |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `gformer_m_ce_sqrtw_geom_seed42` | 2,900,030 | 73 | 0.7397 | 0.5817 | 0.7400 | 0.5832 |
+| `gformer_s_ce_sqrtw_geom_seed42` | 1,489,978 | 42 | 0.7165 | 0.5501 | 0.7143 | 0.5458 |
+| `gformer_m_focal_sqrtw_geom_seed42` | 2,974,142 | 36 | 0.6665 | 0.5178 | 0.6746 | 0.5430 |
+
+The useful scaling result is from `gformer_s` to `gformer_m`: macro-F1 improves from `0.5501` to `0.5817`. The focal-loss medium run did not help in the current setup.
+
+Training artifacts:
+
+- `output/jupyter-notebook/emotional_expressivity/rafdb_graphormer_lite_full_colab_uv_mediapipe_legacy_exp.ipynb`
+- `output/jupyter-notebook/emotional_expressivity/rafdb_graphormer_lite_full_run_exp/`
+- `output/jupyter-notebook/emotional_expressivity/rafdb_graphormer_lite_full_run_exp/experiments/20260525_140301_gformer_m_ce_sqrtw_geom_seed42/summary.json`
+
+### Comparison with py-feat
+
+The py-feat comparison notebook evaluates both models on the same RAF-DB image sample:
+
+```python
+image_for_test, facial_landmarks_for_test = pick_image_frpm_dataset(emotion="anger")
+result_gformer = inferance_gformer(facial_landmarks_for_test)
+result_pyfeat = inferance_pyfeat(image_for_test)
+```
+
+Comparison artifact size: `315` images, `45` per class.
+
+Top-label match against RAF-DB labels:
+
+| comparison | agreement rate | n |
+| --- | ---: | ---: |
+| `pyfeat_top_vs_dataset_label` | 0.4476 | 315 |
+| `gformer_m_top_vs_dataset_label` | 0.6127 | 315 |
+| `gformer_m_top_vs_pyfeat_top` | 0.3778 | 315 |
+
+Interpretation:
+
+- `gformer_m` is more aligned with RAF-DB labels on this sample.
+- py-feat is not an oracle; it is a different image-based model with a different training source and preprocessing stack.
+- Low agreement between py-feat and Graphormer-lite mostly shows representation and calibration mismatch, not that one model is universally correct.
+
+py-feat comparison artifacts:
+
+- `output/jupyter-notebook/emotional_expressivity/mediapipe_pyfeat_test.ipynb`
+- `output/jupyter-notebook/emotional_expressivity/mediapipe_pyfeat_test/results/`
+- `output/jupyter-notebook/emotional_expressivity/model_training_report_assets/pyfeat_vs_gformer_m_class_match.png`
+
+### Why the MLP baseline is still important
+
+The old `flattened_mlp` baseline remains close to `gformer_s`:
+
+| model | params | best epoch | test accuracy | test macro-F1 | test balanced accuracy |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `flattened_mlp` | 802,567 | 53 | 0.7140 | 0.5470 | 0.5667 |
+| `gformer_s_ce_sqrtw_geom` | 1,489,978 | 42 | 0.7165 | 0.5501 | 0.5458 |
+
+This is plausible because MediaPipe has already converted pixels into semantically ordered facial landmarks. A dense MLP over fixed landmark indices can immediately mix all face regions globally. Graphormer-lite adds useful graph bias, but the small version does not have enough advantage to clearly beat a well-regularized dense baseline. The medium model is the first variant where the graph-aware design gives a meaningful gain.
+
+Architecture comparison artifacts:
+
+- `output/jupyter-notebook/emotional_expressivity/architecture_comparison/flattened_mlp_vs_gformer_s_architecture.png`
+- `output/jupyter-notebook/emotional_expressivity/architecture_comparison/flattened_mlp_vs_gformer_s_per_class_f1.png`
+
+### Footprint and latency
+
+Local CPU benchmark from `mediapipe_pyfeat_test.ipynb`:
+
+| model | pipeline | params | disk footprint MB | param/buffer memory MB | median latency ms/sample |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `gformer_s` | precomputed landmarks -> logits | 1,489,978 | 10.955 | 10.928 | 20.983 |
+| `gformer_m` | precomputed landmarks -> logits | 2,900,030 | 16.337 | 16.307 | 37.128 |
+| `py-feat_default_stack` | raw image -> face/landmark/emotion stack | n/a | 946.464 | 800.026 | 128.901 |
+
+This is not a pure model-only latency comparison. Graphormer-lite assumes MediaPipe landmarks already exist. py-feat includes raw-image face detection, landmark detection, and emotion inference. In a pipeline that already computes MediaPipe landmarks for other features, Graphormer-lite is much cheaper at the emotion-classification step.
+
+Benchmark artifact:
+
+- `output/jupyter-notebook/emotional_expressivity/mediapipe_pyfeat_test/results/model_footprint_latency.csv`
+
+### Practical AIREST conclusion
+
+Use `gformer_m_ce_sqrtw_geom_seed42` as the current best RAF-DB landmark-only emotion baseline. Keep `gformer_s` as the smaller deployment candidate and keep `flattened_mlp` as a required control baseline.
+
+For the current OpenWillis-style `emotional_expressivity` feature, do not treat Graphormer-lite as a full replacement yet:
+
+- it can replace or complement only the 7-emotion classifier branch;
+- it does not replace AU extraction;
+- it does not solve temporal emotional expressivity;
+- it needs calibration checks before probability values are used as stable biomarkers;
+- clinical usage still requires subject-exclusive clinical datasets and temporal/video-level evaluation.
 
 ## Upstream docs vs local code
 

@@ -19,6 +19,14 @@ Markdown. No JSON objects are used in this file.
 | Source size observed locally | About 52 KB |
 | Scope | Interview data capture for PTSD, depression, and anxiety detection |
 
+## Related Mapping Notes
+
+| Note | Purpose |
+| --- | --- |
+| [OpenWillis Landmark Output Schema Note](openwillis_landmark_schema_note.md) | Maps the 468-landmark OpenWillis / MediaPipe Face Mesh output, displacement derivation, region summaries, and numbered landmark visualizations. |
+| [AIREST Gaze and OpenWillis Landmark Compatibility Note](airest_gaze_openwillis_landmark_compatibility.md) | Compares the current AIREST gaze pipeline with OpenWillis landmark indexing, coordinate transforms, and displacement requirements. |
+| [MVP Landmark Artifacts, Storage Scope, and QC Decision](mvp_landmark_artifacts_qc_decision.md) | Defines the minimum landmark artifact set, storage recommendation, coordinate-space metadata, and QC metrics for MVP face/gaze reuse. |
+
 ## Executive Summary
 
 AIREST data capture should be treated as a standardized clinical measurement
